@@ -439,14 +439,25 @@ Para eliminatorias usa phase: r32/r16/qf/sf/tp/final y omite grp.`}]
     }).sort((a,b)=>b.current-a.current)
   },[allNicknames,allQuinielas,matches])
 
-  const winProb=useMemo(()=>{
+const winProb=useMemo(()=>{
     if(playerStats.length===0) return{}
+    const totalCurrent=playerStats.reduce((s,p)=>s+p.current,0)
     const totalMax=playerStats.reduce((s,p)=>s+p.max,0)
+    const useMax = totalCurrent===0
+    const scores=playerStats.map(p=>({
+      nick:p.nick,
+      score: useMax ? p.max : (p.current*0.85 + p.max*0.15)
+    }))
+    const totalScore=scores.reduce((s,p)=>s+p.score,0)
     const probs={}
-    playerStats.forEach(p=>{probs[p.nick]=totalMax>0?Math.round((p.max/totalMax)*100):0})
+    scores.forEach(p=>{probs[p.nick]=totalScore>0?Math.round((p.score/totalScore)*100):0})
+    const total=Object.values(probs).reduce((s,v)=>s+v,0)
+    if(total!==100&&scores.length>0){
+      const sorted=[...scores].sort((a,b)=>b.score-a.score)
+      probs[sorted[0].nick]+=100-total
+    }
     return probs
   },[playerStats])
-
   // ── TABS ──────────────────────────────────────────────────
   const TABS=[
     {id:'grupos',label:'📊 Grupos'},
