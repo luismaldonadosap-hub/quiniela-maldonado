@@ -293,6 +293,40 @@ export default function App(){
     loadAllQuinielas()
   }
 
+async function autoFillR32(){
+    const r32Slots = [
+      { t1: {grp:'A', pos:1}, t2: {grp:'B', pos:1} },
+      { t1: {grp:'E', pos:0}, t2: null },
+      { t1: {grp:'F', pos:0}, t2: {grp:'C', pos:1} },
+      { t1: {grp:'C', pos:0}, t2: {grp:'F', pos:1} },
+      { t1: {grp:'I', pos:0}, t2: null },
+      { t1: {grp:'E', pos:1}, t2: {grp:'I', pos:1} },
+      { t1: {grp:'A', pos:0}, t2: null },
+      { t1: {grp:'L', pos:0}, t2: null },
+      { t1: {grp:'G', pos:0}, t2: null },
+      { t1: {grp:'D', pos:0}, t2: {grp:'B', pos:1} },
+      { t1: {grp:'H', pos:0}, t2: {grp:'J', pos:1} },
+      { t1: {grp:'K', pos:1}, t2: {grp:'L', pos:1} },
+      { t1: {grp:'B', pos:0}, t2: null },
+      { t1: {grp:'J', pos:0}, t2: {grp:'H', pos:1} },
+      { t1: {grp:'K', pos:0}, t2: null },
+      { t1: {grp:'D', pos:1}, t2: {grp:'G', pos:1} },
+    ]
+    const r32Matches=matchesRef.current.filter(m=>m.phase==='r32')
+    let updates=0
+    for(let i=0;i<Math.min(r32Slots.length,r32Matches.length);i++){
+      const slot=r32Slots[i]; const match=r32Matches[i]
+      let t1=match.t1, t2=match.t2
+      if(slot.t1){ const g=groupStandings[slot.t1.grp]; if(g&&g[slot.t1.pos]) t1=g[slot.t1.pos][0] }
+      if(slot.t2){ const g=groupStandings[slot.t2.grp]; if(g&&g[slot.t2.pos]) t2=g[slot.t2.pos][0] }
+      if(t1!==match.t1||t2!==match.t2){
+        await supabase.from('matches').upsert({id:match.id,phase:'r32',grp:null,t1,t2,s1:match.s1||'',s2:match.s2||'',pen1:match.pen1||'',pen2:match.pen2||''})
+        updates++
+      }
+    }
+    if(updates>0){ await loadMatches(); setCsvMsg(`✅ ${updates} enfrentamientos actualizados`) }
+    else setCsvMsg('ℹ️ No hay cambios — verifica que los grupos estén completos')
+  }
   async function saveAdminQuiniela(matchId,field,val){
     if(!adminSelectedNick) return
     const cur=allQuinielas.find(r=>r.nickname===adminSelectedNick&&r.match_id===matchId)||{s1:'',s2:''}
@@ -1064,7 +1098,15 @@ const winProb=useMemo(()=>{
         {/* ── ADMIN PANEL ── */}
         {tab==='adminpanel'&&isAdmin&&(
           <div>
-            <div style={{background:'#0d1b2a',borderRadius:12,padding:16,border:'1px solid #1e3a5f',marginBottom:16}}>
+<div style={{background:'#0d1b2a',borderRadius:12,padding:16,border:'1px solid #1e3a5f',marginBottom:16}}>
+              <div style={{fontWeight:800,fontSize:14,color:'#69f0ae',marginBottom:8}}>🏆 Rellenar Ronda de 32 automáticamente</div>
+              <div style={{fontSize:12,color:'#546e7a',marginBottom:12}}>Rellena los enfrentamientos conocidos. Los terceros se introducen manualmente.</div>
+              <button onClick={autoFillR32}
+                style={{background:'#1b5e20',border:'none',borderRadius:10,padding:'10px 20px',color:'#fff',fontWeight:700,cursor:'pointer',fontSize:13}}>
+                ⚡ Rellenar clasificados automáticamente
+              </button>
+            </div>         
+   <div style={{background:'#0d1b2a',borderRadius:12,padding:16,border:'1px solid #1e3a5f',marginBottom:16}}>
               <div style={{fontWeight:800,fontSize:14,color:'#f57f17',marginBottom:8}}>📥 Importar quiniela desde CSV</div>
               <div style={{fontSize:12,color:'#546e7a',marginBottom:12}}>
                 Formato: <code style={{color:'#90caf9'}}>nickname,grupo,equipo1,equipo2,goles1,goles2</code>
