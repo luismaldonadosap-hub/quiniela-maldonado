@@ -971,7 +971,7 @@ export default function App(){
               <div style={{textAlign:'center',color:'#546e7a',padding:30,fontSize:13}}>Aún no hay participantes.</div>
             ):(
               <div>
-                <div style={{display:'flex',gap:8,marginBottom:16,justifyContent:'center'}}>
+                <div style={{display:'flex',gap:8,marginBottom:12,justifyContent:'center'}}>
                   {[{id:'tabla',label:'📋 Tabla comparativa'},{id:'perfil',label:'👤 Perfil individual'}].map(v=>(
                     <button key={v.id} onClick={()=>setPronView(v.id)}
                       style={{background:pronView===v.id?'#1565c0':'#1e2a3a',border:'2px solid',borderColor:pronView===v.id?'#42a5f5':'#37474f',borderRadius:8,padding:'6px 16px',color:pronView===v.id?'#fff':'#90caf9',cursor:'pointer',fontWeight:700,fontSize:12}}>
@@ -979,112 +979,153 @@ export default function App(){
                     </button>
                   ))}
                 </div>
-                {pronView==='tabla'&&(
-                  <div style={{overflowX:'auto'}}>
-                    <table style={{width:'100%',borderCollapse:'collapse',fontSize:12,minWidth:Math.max(400,allNicknames.length*55)}}>
-                      <thead>
-                        <tr style={{background:'#0d2137',color:'#90caf9'}}>
-                          <th style={{padding:'8px 10px',textAlign:'left',minWidth:120}}>Partido</th>
-                          {allNicknames.map(nick=>(
-                            <th key={nick} style={{padding:'4px 2px',textAlign:'center',minWidth:50,color:nick===nickname?'#42a5f5':'#90caf9'}}>
-                              {nick===nickname?'⭐ '+nick:nick}
-                            </th>
-                          ))}
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {groupMs.map(m=>(
-                          <tr key={m.id} style={{borderTop:'1px solid #1e3a5f',background:'#0d1b2a'}}>
-                            <td style={{padding:'8px 10px',color:'#cfd8dc'}}>
-                              <div style={{fontSize:11}}>{FLAGS[m.t1]||'🏳'} {m.t1}</div>
-                              <div style={{fontSize:11}}>{FLAGS[m.t2]||'🏳'} {m.t2}</div>
-                              {m.s1!==''&&m.s2!==''&&<div style={{fontSize:10,color:'#546e7a',marginTop:2}}>Real: {m.s1}–{m.s2}</div>}
-                            </td>
-                            {allNicknames.map(nick=>{
-                              const q=getQ(nick,m.id)
-                              const badge=getBadge(m,q)
-                              return(
-                                <td key={nick} style={{padding:'8px 6px',textAlign:'center',background:nick===nickname?'rgba(21,101,192,0.1)':'transparent'}}>
-                                  {q&&q.s1!==''&&q.s2!==''?(
-                                    <div>
-                                      <div style={{fontWeight:700,color:'#fff'}}>{q.s1}–{q.s2}</div>
-                                      {badge&&<div style={{fontSize:11,color:badge.color}}>{badge.label}</div>}
-                                    </div>
-                                  ):<span style={{color:'#37474f'}}>—</span>}
-                                </td>
-                              )
-                            })}
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                )}
-                {pronView==='perfil'&&(
-                  <div>
-                    <div style={{display:'flex',flexWrap:'wrap',gap:6,marginBottom:16,justifyContent:'center'}}>
-                      {allNicknames.map(nick=>(
-                        <button key={nick} onClick={()=>setSelectedNick(nick)}
-                          style={{background:selectedNick===nick?'#6a1b9a':'#1e2a3a',border:'2px solid',borderColor:selectedNick===nick?'#ce93d8':'#37474f',borderRadius:20,padding:'5px 14px',color:selectedNick===nick?'#fff':'#90caf9',cursor:'pointer',fontWeight:700,fontSize:12}}>
-                          {nick===nickname?'⭐ '+nick:nick}
+
+                {/* Selector fase o grupo */}
+                {(()=>{
+                  const isGroupPhase = !['r32','r16','qf','sf','tp','final'].includes(activeGroup)
+                  return(
+                    <div>
+                      {/* Selector de fase */}
+                      <div style={{display:'flex',flexWrap:'wrap',gap:5,marginBottom:8,justifyContent:'center'}}>
+                        <button onClick={()=>setActiveGroup('A')}
+                          style={{background:isGroupPhase?'#1565c0':'#1e2a3a',border:'2px solid',borderColor:isGroupPhase?'#42a5f5':'#37474f',borderRadius:8,padding:'4px 12px',color:isGroupPhase?'#fff':'#90caf9',cursor:'pointer',fontWeight:700,fontSize:11}}>
+                          ⚽ Grupos
                         </button>
-                      ))}
+                        {['r32','r16','qf','sf','final'].map(p=>{
+                          const hasTeams=matches.filter(m=>m.phase===p&&m.t1).length>0
+                          return hasTeams?(
+                            <button key={p} onClick={()=>setActiveGroup(p)}
+                              style={{background:activeGroup===p?'#7b1fa2':'#1e2a3a',border:'2px solid',borderColor:activeGroup===p?'#ce93d8':'#37474f',borderRadius:8,padding:'4px 12px',color:activeGroup===p?'#fff':'#90caf9',cursor:'pointer',fontWeight:700,fontSize:11}}>
+                              {PHASE_NAMES[p]}
+                            </button>
+                          ):null
+                        })}
+                      </div>
+
+                      {/* Selector de grupo A-L si estamos en fase de grupos */}
+                      {isGroupPhase&&(
+                        <div style={{display:'flex',flexWrap:'wrap',gap:5,marginBottom:12,justifyContent:'center'}}>
+                          {Object.keys(GROUPS).map(g=>(
+                            <button key={g} onClick={()=>setActiveGroup(g)}
+                              style={{background:activeGroup===g?'#1565c0':'#1e2a3a',border:'2px solid',borderColor:activeGroup===g?'#42a5f5':'#37474f',borderRadius:8,padding:'4px 11px',color:activeGroup===g?'#fff':'#90caf9',cursor:'pointer',fontWeight:700,fontSize:12}}>
+                              Grupo {g}
+                            </button>
+                          ))}
+                        </div>
+                      )}
                     </div>
-                    {selectedNick&&(()=>{
-                      let exactos=0,parciales=0,fallos=0
-                      matches.forEach(m=>{
-                        const q=getQ(selectedNick,m.id)
-                        const badge=getBadge(m,q)
-                        if(!badge) return
-                        if(badge.pts===3) exactos++
-                        else if(badge.pts===1) parciales++
-                        else fallos++
-                      })
-                      const pts=exactos*3+parciales
-                      return(
+                  )
+                })()}
+
+                {/* Partidos a mostrar */}
+                {(()=>{
+                  const isKnockout=['r32','r16','qf','sf','tp','final'].includes(activeGroup)
+                  const displayMatches = isKnockout
+                    ? matches.filter(m=>m.phase===activeGroup&&m.t1)
+                    : groupMs
+                  return(
+                    <div>
+                      {pronView==='tabla'&&(
+                        <div style={{overflowX:'auto'}}>
+                          <table style={{width:'100%',borderCollapse:'collapse',fontSize:12,minWidth:Math.max(400,allNicknames.length*55)}}>
+                            <thead>
+                              <tr style={{background:'#0d2137',color:'#90caf9'}}>
+                                <th style={{padding:'8px 10px',textAlign:'left',minWidth:120}}>Partido</th>
+                                {allNicknames.map(nick=>(
+                                  <th key={nick} style={{padding:'4px 2px',textAlign:'center',minWidth:50,color:nick===nickname?'#42a5f5':'#90caf9'}}>
+                                    {nick===nickname?'⭐ '+nick:nick}
+                                  </th>
+                                ))}
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {displayMatches.map(m=>(
+                                <tr key={m.id} style={{borderTop:'1px solid #1e3a5f',background:'#0d1b2a'}}>
+                                  <td style={{padding:'8px 10px',color:'#cfd8dc'}}>
+                                    <div style={{fontSize:11}}>{FLAGS[m.t1]||'🏳'} {m.t1}</div>
+                                    <div style={{fontSize:11}}>{FLAGS[m.t2]||'🏳'} {m.t2}</div>
+                                    {m.s1!==''&&m.s2!==''&&<div style={{fontSize:10,color:'#546e7a',marginTop:2}}>Real: {m.s1}–{m.s2}{m.pen1?` (P${m.pen1}-${m.pen2})`:''}</div>}
+                                  </td>
+                                  {allNicknames.map(nick=>{
+                                    const q=getQ(nick,m.id)
+                                    const badge=getBadge(m,q)
+                                    return(
+                                      <td key={nick} style={{padding:'8px 6px',textAlign:'center',background:nick===nickname?'rgba(21,101,192,0.1)':'transparent'}}>
+                                        {q&&q.s1!==''&&q.s2!==''?(
+                                          <div>
+                                            <div style={{fontWeight:700,color:'#fff'}}>{q.s1}–{q.s2}</div>
+                                            {badge&&<div style={{fontSize:11,color:badge.color}}>{badge.label}</div>}
+                                          </div>
+                                        ):<span style={{color:'#37474f'}}>—</span>}
+                                      </td>
+                                    )
+                                  })}
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      )}
+                      {pronView==='perfil'&&(
                         <div>
-                          <div style={{display:'grid',gridTemplateColumns:'repeat(4,1fr)',gap:8,marginBottom:16}}>
-                            {[{label:'Puntos',val:pts,color:'#fff',bg:'#1565c0'},{label:'Exactos',val:exactos,color:'#69f0ae',bg:'#1b5e20'},{label:'Parciales',val:parciales,color:'#ffeb3b',bg:'#f57f17'},{label:'Fallos',val:fallos,color:'#ef9a9a',bg:'#b71c1c'}].map(s=>(
-                              <div key={s.label} style={{background:s.bg,borderRadius:10,padding:'10px 8px',textAlign:'center'}}>
-                                <div style={{fontSize:22,fontWeight:800,color:s.color}}>{s.val}</div>
-                                <div style={{fontSize:11,color:'rgba(255,255,255,0.8)'}}>{s.label}</div>
-                              </div>
-                            ))}
-                          </div>
-                          <div style={{display:'flex',flexWrap:'wrap',gap:5,marginBottom:12,justifyContent:'center'}}>
-                            {Object.keys(GROUPS).map(g=>(
-                              <button key={g} onClick={()=>setActiveGroup(g)}
-                                style={{background:activeGroup===g?'#6a1b9a':'#1e2a3a',border:'2px solid',borderColor:activeGroup===g?'#ce93d8':'#37474f',borderRadius:8,padding:'4px 11px',color:activeGroup===g?'#fff':'#90caf9',cursor:'pointer',fontWeight:700,fontSize:12}}>
-                                Grupo {g}
+                          <div style={{display:'flex',flexWrap:'wrap',gap:6,marginBottom:16,justifyContent:'center'}}>
+                            {allNicknames.map(nick=>(
+                              <button key={nick} onClick={()=>setSelectedNick(nick)}
+                                style={{background:selectedNick===nick?'#6a1b9a':'#1e2a3a',border:'2px solid',borderColor:selectedNick===nick?'#ce93d8':'#37474f',borderRadius:20,padding:'5px 14px',color:selectedNick===nick?'#fff':'#90caf9',cursor:'pointer',fontWeight:700,fontSize:12}}>
+                                {nick===nickname?'⭐ '+nick:nick}
                               </button>
                             ))}
                           </div>
-                          {groupMs.map(m=>{
-                            const q=getQ(selectedNick,m.id)
-                            const badge=getBadge(m,q)
+                          {selectedNick&&(()=>{
+                            let exactos=0,parciales=0,fallos=0
+                            matches.forEach(m=>{
+                              const q=getQ(selectedNick,m.id)
+                              const badge=getBadge(m,q)
+                              if(!badge) return
+                              if(badge.pts===3) exactos++
+                              else if(badge.pts===1) parciales++
+                              else fallos++
+                            })
+                            const pts=exactos*3+parciales
                             return(
-                              <div key={m.id} style={{background:'#0d1b2a',borderRadius:10,padding:'10px 12px',border:'1px solid #1e3a5f',marginBottom:6}}>
-                                <div style={{display:'flex',alignItems:'center',gap:8,flexWrap:'wrap'}}>
-                                  <div style={{flex:1,textAlign:'right',fontSize:13,fontWeight:600}}>{F(m.t1)}</div>
-                                  <div style={{textAlign:'center',minWidth:80}}>
-                                    {q&&q.s1!==''&&q.s2!==''?(
-                                      <div>
-                                        <div style={{fontWeight:800,fontSize:16,color:'#ce93d8'}}>{q.s1}–{q.s2}</div>
-                                        {badge&&<div style={{fontSize:11,color:badge.color}}>{badge.label}</div>}
-                                        {m.s1!==''&&m.s2!==''&&<div style={{fontSize:10,color:'#546e7a'}}>Real: {m.s1}–{m.s2}</div>}
-                                      </div>
-                                    ):<span style={{color:'#37474f',fontSize:13}}>Sin pronóstico</span>}
-                                  </div>
-                                  <div style={{flex:1,textAlign:'left',fontSize:13,fontWeight:600}}>{F(m.t2)}</div>
+                              <div>
+                                <div style={{display:'grid',gridTemplateColumns:'repeat(4,1fr)',gap:8,marginBottom:16}}>
+                                  {[{label:'Puntos',val:pts,color:'#fff',bg:'#1565c0'},{label:'Exactos',val:exactos,color:'#69f0ae',bg:'#1b5e20'},{label:'Parciales',val:parciales,color:'#ffeb3b',bg:'#f57f17'},{label:'Fallos',val:fallos,color:'#ef9a9a',bg:'#b71c1c'}].map(s=>(
+                                    <div key={s.label} style={{background:s.bg,borderRadius:10,padding:'10px 8px',textAlign:'center'}}>
+                                      <div style={{fontSize:22,fontWeight:800,color:s.color}}>{s.val}</div>
+                                      <div style={{fontSize:11,color:'rgba(255,255,255,0.8)'}}>{s.label}</div>
+                                    </div>
+                                  ))}
                                 </div>
+                                {displayMatches.map(m=>{
+                                  const q=getQ(selectedNick,m.id)
+                                  const badge=getBadge(m,q)
+                                  return(
+                                    <div key={m.id} style={{background:'#0d1b2a',borderRadius:10,padding:'10px 12px',border:'1px solid #1e3a5f',marginBottom:6}}>
+                                      <div style={{display:'flex',alignItems:'center',gap:8,flexWrap:'wrap'}}>
+                                        <div style={{flex:1,textAlign:'right',fontSize:13,fontWeight:600}}>{F(m.t1)}</div>
+                                        <div style={{textAlign:'center',minWidth:80}}>
+                                          {q&&q.s1!==''&&q.s2!==''?(
+                                            <div>
+                                              <div style={{fontWeight:800,fontSize:16,color:'#ce93d8'}}>{q.s1}–{q.s2}</div>
+                                              {badge&&<div style={{fontSize:11,color:badge.color}}>{badge.label}</div>}
+                                              {m.s1!==''&&m.s2!==''&&<div style={{fontSize:10,color:'#546e7a'}}>Real: {m.s1}–{m.s2}</div>}
+                                            </div>
+                                          ):<span style={{color:'#37474f',fontSize:13}}>Sin pronóstico</span>}
+                                        </div>
+                                        <div style={{flex:1,textAlign:'left',fontSize:13,fontWeight:600}}>{F(m.t2)}</div>
+                                      </div>
+                                    </div>
+                                  )
+                                })}
                               </div>
                             )
-                          })}
+                          })()}
                         </div>
-                      )
-                    })()}
-                  </div>
-                )}
+                      )}
+                    </div>
+                  )
+                })()}
               </div>
             )}
           </div>
