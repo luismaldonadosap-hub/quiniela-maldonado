@@ -2,17 +2,20 @@ import { useState, useEffect, useMemo, useCallback, useRef } from 'react'
 import { supabase } from './supabase.js'
 
 // ── CONSTANTES ────────────────────────────────────────────────
-const ADMIN_PIN  = '2145'
-const LOCK_DATE  = new Date('2026-06-11T21:00:00Z')
+const ADMIN_PIN = '2145'
+const LOCK_DATE = new Date('2026-06-11T21:00:00Z')
 
-// Lock dates for each knockout phase (5 min before first match)
 const PHASE_LOCK_DATES = {
   groups: new Date('2026-06-11T21:00:00Z'),
-  r32:    new Date('2026-06-28T19:55:00Z'), // 5 min before 20:00 UTC (LA 13:00 PT)
-  r16:    new Date('2026-07-04T17:55:00Z'), // 5 min before 18:00 UTC
-  qf:     new Date('2026-07-08T17:55:00Z'), // 5 min before 18:00 UTC
-  sf:     new Date('2026-07-11T19:55:00Z'), // 5 min before 20:00 UTC
-  final:  new Date('2026-07-18T18:55:00Z'), // 5 min before 19:00 UTC
+  r32:    new Date('2026-06-28T19:55:00Z'),
+  r16:    new Date('2026-07-04T17:55:00Z'),
+  qf:     new Date('2026-07-08T17:55:00Z'),
+  sf:     new Date('2026-07-11T19:55:00Z'),
+  final:  new Date('2026-07-18T18:55:00Z'),
+}
+
+const PHASE_NAMES = {
+  groups:'Grupos', r32:'Ronda de 32', r16:'Octavos', qf:'Cuartos', sf:'Semis', final:'Final'
 }
 
 const GROUPS = {
@@ -44,58 +47,56 @@ const FLAGS = {
   'Portugal':'🇵🇹','DR Congo':'🇨🇩','Uzbekistán':'🇺🇿','Colombia':'🇨🇴',
   'Inglaterra':'🏴󠁧󠁢󠁥󠁮󠁧󠁿','Croacia':'🇭🇷','Ghana':'🇬🇭','Panamá':'🇵🇦',
 }
-const F = t => (FLAGS[t] || '🏳') + ' ' + (t || '?')
+const F = t => (FLAGS[t]||'🏳')+' '+(t||'?')
 
 const PHASE_ORDER  = ['r32','r16','qf','sf','tp','final']
 const PHASE_LABELS = {r32:'Ronda de 32',r16:'Octavos',qf:'Cuartos',sf:'Semis',tp:'3er Puesto',final:'⭐ Final'}
 const PHASE_COLORS = {r32:'#546e7a',r16:'#1565c0',qf:'#6a1b9a',sf:'#ad1457',tp:'#37474f',final:'#f57f17'}
 const PHASE_COUNT  = {r32:16,r16:8,qf:4,sf:2,tp:1,final:1}
 
-// Bracket tree: maps r32 match index to r16 slot and position
+// Bracket tree for auto-advance
 const BRACKET_TREE = {
-  // r32 index → { r16index, pos (0=t1, 1=t2) }
   r32: [
-    {next:'r16', idx:0, pos:0}, // M73 winner → M89 t1
-    {next:'r16', idx:1, pos:0}, // M74 winner → M90 t1
-    {next:'r16', idx:0, pos:1}, // M75 winner → M89 t2
-    {next:'r16', idx:1, pos:1}, // M76 winner → M90 t2
-    {next:'r16', idx:2, pos:0}, // M77 winner → M91 t1
-    {next:'r16', idx:2, pos:1}, // M78 winner → M91 t2
-    {next:'r16', idx:3, pos:0}, // M79 winner → M92 t1
-    {next:'r16', idx:3, pos:1}, // M80 winner → M92 t2
-    {next:'r16', idx:4, pos:0}, // M81 winner → M93 t1
-    {next:'r16', idx:4, pos:1}, // M82 winner → M93 t2
-    {next:'r16', idx:5, pos:0}, // M83 winner → M94 t1
-    {next:'r16', idx:5, pos:1}, // M84 winner → M94 t2
-    {next:'r16', idx:6, pos:0}, // M85 winner → M95 t1
-    {next:'r16', idx:6, pos:1}, // M86 winner → M95 t2
-    {next:'r16', idx:7, pos:0}, // M87 winner → M96 t1
-    {next:'r16', idx:7, pos:1}, // M88 winner → M96 t2
+    {next:'r16',idx:0,pos:0},{next:'r16',idx:1,pos:0},{next:'r16',idx:0,pos:1},{next:'r16',idx:1,pos:1},
+    {next:'r16',idx:2,pos:0},{next:'r16',idx:2,pos:1},{next:'r16',idx:3,pos:0},{next:'r16',idx:3,pos:1},
+    {next:'r16',idx:4,pos:0},{next:'r16',idx:4,pos:1},{next:'r16',idx:5,pos:0},{next:'r16',idx:5,pos:1},
+    {next:'r16',idx:6,pos:0},{next:'r16',idx:6,pos:1},{next:'r16',idx:7,pos:0},{next:'r16',idx:7,pos:1},
   ],
   r16: [
-    {next:'qf', idx:0, pos:0}, // M89 winner → QF1 t1
-    {next:'qf', idx:0, pos:1}, // M90 winner → QF1 t2
-    {next:'qf', idx:1, pos:0}, // M91 winner → QF2 t1
-    {next:'qf', idx:1, pos:1}, // M92 winner → QF2 t2
-    {next:'qf', idx:2, pos:0}, // M93 winner → QF3 t1
-    {next:'qf', idx:2, pos:1}, // M94 winner → QF3 t2
-    {next:'qf', idx:3, pos:0}, // M95 winner → QF4 t1
-    {next:'qf', idx:3, pos:1}, // M96 winner → QF4 t2
+    {next:'qf',idx:0,pos:0},{next:'qf',idx:0,pos:1},{next:'qf',idx:1,pos:0},{next:'qf',idx:1,pos:1},
+    {next:'qf',idx:2,pos:0},{next:'qf',idx:2,pos:1},{next:'qf',idx:3,pos:0},{next:'qf',idx:3,pos:1},
   ],
   qf: [
-    {next:'sf', idx:0, pos:0},
-    {next:'sf', idx:0, pos:1},
-    {next:'sf', idx:1, pos:0},
-    {next:'sf', idx:1, pos:1},
+    {next:'sf',idx:0,pos:0},{next:'sf',idx:0,pos:1},{next:'sf',idx:1,pos:0},{next:'sf',idx:1,pos:1},
   ],
   sf: [
-    {next:'final', idx:0, pos:0},
-    {next:'final', idx:0, pos:1},
-    {next:'tp', idx:0, pos:0},  // loser → 3rd place
-    {next:'tp', idx:0, pos:1},
+    {next:'final',idx:0,pos:0},{next:'final',idx:0,pos:1},
+    {next:'tp',idx:0,pos:0},{next:'tp',idx:0,pos:1},
   ],
 }
-function buildGroupMatches() {
+
+// R32 official bracket slots
+const R32_SLOTS = [
+  {t1:{grp:'A',pos:1},t2:{grp:'B',pos:1}}, // M73: 2A vs 2B
+  {t1:{grp:'E',pos:0},t2:null},              // M74: 1E vs 3rd
+  {t1:{grp:'F',pos:0},t2:{grp:'C',pos:1}},  // M75: 1F vs 2C
+  {t1:{grp:'C',pos:0},t2:{grp:'F',pos:1}},  // M76: 1C vs 2F
+  {t1:{grp:'I',pos:0},t2:null},              // M77: 1I vs 3rd
+  {t1:{grp:'E',pos:1},t2:{grp:'I',pos:1}},  // M78: 2E vs 2I
+  {t1:{grp:'A',pos:0},t2:null},              // M79: 1A vs 3rd
+  {t1:{grp:'L',pos:0},t2:null},              // M80: 1L vs 3rd
+  {t1:{grp:'D',pos:0},t2:null},              // M81: 1D vs 3rd
+  {t1:{grp:'G',pos:0},t2:null},              // M82: 1G vs 3rd
+  {t1:{grp:'K',pos:1},t2:{grp:'L',pos:1}},  // M83: 2K vs 2L
+  {t1:{grp:'H',pos:0},t2:{grp:'J',pos:1}},  // M84: 1H vs 2J
+  {t1:{grp:'B',pos:0},t2:null},              // M85: 1B vs 3rd
+  {t1:{grp:'J',pos:0},t2:{grp:'H',pos:1}},  // M86: 1J vs 2H
+  {t1:{grp:'K',pos:0},t2:null},              // M87: 1K vs 3rd
+  {t1:{grp:'D',pos:1},t2:{grp:'G',pos:1}},  // M88: 2D vs 2G
+]
+
+// ── GENERADORES ───────────────────────────────────────────────
+function buildGroupMatches(){
   const m=[]; let id=0
   const pairs=[[0,1],[2,3],[0,2],[1,3],[0,3],[1,2]]
   for(const [grp,teams] of Object.entries(GROUPS)){
@@ -103,17 +104,17 @@ function buildGroupMatches() {
   }
   return m
 }
-function buildKnockoutMatches() {
+function buildKnockoutMatches(){
   const m=[]; let id=0
   for(const phase of PHASE_ORDER){
     for(let i=0;i<PHASE_COUNT[phase];i++) m.push({id:`${phase}-${id++}`,phase,grp:null,t1:'',t2:'',s1:'',s2:'',pen1:'',pen2:''})
   }
   return m
 }
-const DEFAULT_MATCHES = [...buildGroupMatches(), ...buildKnockoutMatches()]
+const DEFAULT_MATCHES=[...buildGroupMatches(),...buildKnockoutMatches()]
 
 // ── STANDINGS ─────────────────────────────────────────────────
-function sortGroup(teams, matches){
+function sortGroup(teams,matches){
   const s={}
   teams.forEach(t=>{s[t]={pts:0,pj:0,pg:0,pe:0,pp:0,gf:0,gc:0}})
   matches.forEach(m=>{
@@ -135,7 +136,7 @@ function sortGroup(teams, matches){
 }
 
 // ── COMPONENTES ───────────────────────────────────────────────
-const ScoreInput = ({val,onChange,locked,w=44,color='#fff'}) => (
+const ScoreInput=({val,onChange,locked,w=44,color='#fff'})=>(
   <input type="number" min="0" max="30" value={val}
     onChange={e=>!locked&&onChange(e.target.value)}
     readOnly={locked}
@@ -144,7 +145,7 @@ const ScoreInput = ({val,onChange,locked,w=44,color='#fff'}) => (
       color,fontSize:16,fontWeight:800,padding:'4px',cursor:locked?'not-allowed':'text'}}/>
 )
 
-function MatchRow({m,onScore,locked,isAdmin}){
+function MatchRow({m,onScore,locked}){
   const hasPen=m.s1!==''&&m.s2!==''&&parseInt(m.s1)===parseInt(m.s2)&&m.phase!=='groups'
   return(
     <div style={{background:'#0d1b2a',borderRadius:10,padding:'10px 12px',border:'1px solid #1e3a5f',marginBottom:6,opacity:m.t1||m.phase==='groups'?1:0.4}}>
@@ -171,6 +172,7 @@ function MatchRow({m,onScore,locked,isAdmin}){
 
 // ── APP ───────────────────────────────────────────────────────
 export default function App(){
+  // Auth states
   const [nickname,setNickname]         = useState('')
   const [nickInput,setNickInput]       = useState('')
   const [pinInput,setPinInput]         = useState('')
@@ -178,71 +180,99 @@ export default function App(){
   const [pinAuth,setPinAuth]           = useState('')
   const [pinStep,setPinStep]           = useState('nick')
   const [pinErrorMsg,setPinErrorMsg]   = useState('')
-  const [tab,setTab]                   = useState('grupos')
-  const [activeGroup,setActiveGroup]   = useState('A')
-  const [matches,setMatches]           = useState(DEFAULT_MATCHES)
-  const matchesRef                     = useRef(DEFAULT_MATCHES)
-  const [quiniela,setQuiniela]         = useState({})
-  const [allQuinielas,setAllQuinielas] = useState([])
+  // Admin states
   const [isAdmin,setIsAdmin]           = useState(false)
   const [showLogin,setShowLogin]       = useState(false)
   const [pin,setPin]                   = useState('')
   const [adminPinError,setAdminPinError] = useState(false)
-  const [saving,setSaving]             = useState(false)
-  const [aiLoading,setAiLoading]       = useState(false)
-  const [aiMsg,setAiMsg]               = useState('')
+  // Change PIN states
+  const [showChangePin,setShowChangePin]       = useState(false)
+  const [changePinCurrent,setChangePinCurrent] = useState('')
+  const [changePinNew,setChangePinNew]         = useState('')
+  const [changePinConfirm,setChangePinConfirm] = useState('')
+  const [changePinMsg,setChangePinMsg]         = useState('')
+  // UI states
+  const [tab,setTab]                   = useState('grupos')
+  const [activeGroup,setActiveGroup]   = useState('A')
+  const [quinielaPhase,setQuinielaPhase] = useState('groups')
   const [pronView,setPronView]         = useState('tabla')
   const [selectedNick,setSelectedNick] = useState('')
   const [adminSelectedNick,setAdminSelectedNick] = useState('')
+  // Data states
+  const [matches,setMatches]           = useState(DEFAULT_MATCHES)
+  const matchesRef                     = useRef(DEFAULT_MATCHES)
+  const [quiniela,setQuiniela]         = useState({})
+  const [allQuinielas,setAllQuinielas] = useState([])
+  const [manualUnlock,setManualUnlock] = useState({})
+  // Loading states
+  const [saving,setSaving]             = useState(false)
+  const [aiLoading,setAiLoading]       = useState(false)
+  const [aiMsg,setAiMsg]               = useState('')
   const [csvMsg,setCsvMsg]             = useState('')
   const [csvLoading,setCsvLoading]     = useState(false)
-  const [quinielaPhase, setQuinielaPhase] = useState('groups')
-  const [showChangePin,setShowChangePin]   = useState(false)
-  const [changePinCurrent,setChangePinCurrent] = useState('')
-  const [changePinNew,setChangePinNew]     = useState('')
-  const [changePinConfirm,setChangePinConfirm] = useState('')
-  const [changePinMsg,setChangePinMsg]     = useState('')
 
   const now = new Date()
   const isLocked = now >= LOCK_DATE && !isAdmin
   const tournamentStarted = now >= LOCK_DATE
 
-  // Keep matchesRef in sync with matches state
-  useEffect(()=>{ matchesRef.current = matches },[matches])
+  // Keep matchesRef in sync
+  useEffect(()=>{ matchesRef.current=matches },[matches])
+
+  // ── PHASE UNLOCK ──────────────────────────────────────────
+  const isPhaseOpen = useCallback((phase)=>{
+    if(isAdmin) return true
+    if(manualUnlock[phase]) return true
+    return now < PHASE_LOCK_DATES[phase]
+  },[isAdmin,manualUnlock,now])
 
   // ── CARGA INICIAL ─────────────────────────────────────────
   useEffect(()=>{ loadMatches() },[])
   useEffect(()=>{ if(nickname){ loadMyQuiniela(); loadAllQuinielas() } },[nickname])
+  useEffect(()=>{ loadUnlocks() },[])
 
   async function loadMatches(){
-    const {data} = await supabase.from('matches').select('*')
-    if(data&&data.length>0){
-      setMatches(prev=>prev.map(m=>{
-        const row=data.find(r=>r.id===m.id)
-        return row?{...m,t1:row.t1||m.t1,t2:row.t2||m.t2,s1:row.s1||'',s2:row.s2||'',pen1:row.pen1||'',pen2:row.pen2||''}:m
-      }))
-    }
+    try{
+      const {data}=await supabase.from('matches').select('*')
+      if(data&&data.length>0){
+        setMatches(prev=>prev.map(m=>{
+          const row=data.find(r=>r.id===m.id)
+          return row?{...m,t1:row.t1||m.t1,t2:row.t2||m.t2,s1:row.s1||'',s2:row.s2||'',pen1:row.pen1||'',pen2:row.pen2||''}:m
+        }))
+      }
+    }catch(e){}
   }
 
   async function loadMyQuiniela(){
-    const {data} = await supabase.from('quiniela').select('*').eq('nickname',nickname)
-    if(data){ const q={}; data.forEach(r=>{q[r.match_id]={s1:r.s1,s2:r.s2}}); setQuiniela(q) }
+    try{
+      const {data}=await supabase.from('quiniela').select('*').eq('nickname',nickname)
+      if(data){ const q={}; data.forEach(r=>{q[r.match_id]={s1:r.s1,s2:r.s2}}); setQuiniela(q) }
+    }catch(e){}
   }
 
   async function loadAllQuinielas(){
-    const {data} = await supabase.from('quiniela').select('*')
-    if(data) setAllQuinielas(data)
+    try{
+      const {data}=await supabase.from('quiniela').select('*')
+      if(data) setAllQuinielas(data)
+    }catch(e){}
+  }
+
+  async function loadUnlocks(){
+    try{
+      const {data}=await supabase.from('config').select('*').like('key','unlock_%')
+      if(data){
+        const u={}
+        data.forEach(r=>{u[r.key.replace('unlock_','')]=r.value==='true'})
+        setManualUnlock(u)
+      }
+    }catch(e){}
   }
 
   // ── REALTIME ──────────────────────────────────────────────
   useEffect(()=>{
-    const ch1=supabase.channel('matches-changes')
-      .on('postgres_changes',{event:'*',schema:'public',table:'matches'},()=>loadMatches())
-      .subscribe()
-    const ch2=supabase.channel('quiniela-changes')
-      .on('postgres_changes',{event:'*',schema:'public',table:'quiniela'},()=>loadAllQuinielas())
-      .subscribe()
-    return()=>{ supabase.removeChannel(ch1); supabase.removeChannel(ch2) }
+    const ch1=supabase.channel('matches-ch').on('postgres_changes',{event:'*',schema:'public',table:'matches'},()=>loadMatches()).subscribe()
+    const ch2=supabase.channel('quiniela-ch').on('postgres_changes',{event:'*',schema:'public',table:'quiniela'},()=>loadAllQuinielas()).subscribe()
+    const ch3=supabase.channel('config-ch').on('postgres_changes',{event:'*',schema:'public',table:'config'},()=>loadUnlocks()).subscribe()
+    return()=>{ supabase.removeChannel(ch1); supabase.removeChannel(ch2); supabase.removeChannel(ch3) }
   },[])
 
   // ── PIN HANDLERS ──────────────────────────────────────────
@@ -264,9 +294,11 @@ export default function App(){
   }
 
   async function handleVerifyPin(){
-    const {data}=await supabase.from('players').select('pin').eq('nickname',nickname)
-    if(data&&data.length>0&&data[0].pin===pinAuth){ setPinStep('done'); setPinErrorMsg('') }
-    else setPinErrorMsg('PIN incorrecto')
+    try{
+      const {data}=await supabase.from('players').select('pin').eq('nickname',nickname)
+      if(data&&data.length>0&&data[0].pin===pinAuth){ setPinStep('done'); setPinErrorMsg('') }
+      else setPinErrorMsg('PIN incorrecto')
+    }catch{ setPinErrorMsg('Error al verificar PIN') }
   }
 
   async function handleChangePin(){
@@ -285,54 +317,51 @@ export default function App(){
     else setAdminPinError(true)
   }
 
-  // ── MATCH SCORES ──────────────────────────────────────────
-  // Get winner of a match (considering penalties for knockout)
+  async function togglePhaseUnlock(phase){
+    const newVal=!(manualUnlock[phase]||false)
+    setManualUnlock(prev=>({...prev,[phase]:newVal}))
+    try{ await supabase.from('config').upsert({key:`unlock_${phase}`,value:String(newVal)}) }catch(e){}
+  }
+
+  // ── WINNER LOGIC ──────────────────────────────────────────
   function getWinner(m){
-    const s1=parseInt(m.s1), s2=parseInt(m.s2)
+    const s1=parseInt(m.s1),s2=parseInt(m.s2)
     if(isNaN(s1)||isNaN(s2)) return null
     if(s1>s2) return m.t1
     if(s2>s1) return m.t2
-    // Draw — check penalties
     if(m.pen1&&m.pen2){
-      const p1=parseInt(m.pen1), p2=parseInt(m.pen2)
-      if(!isNaN(p1)&&!isNaN(p2)){
-        if(p1>p2) return m.t1
-        if(p2>p1) return m.t2
-      }
+      const p1=parseInt(m.pen1),p2=parseInt(m.pen2)
+      if(!isNaN(p1)&&!isNaN(p2)){ if(p1>p2) return m.t1; if(p2>p1) return m.t2 }
     }
     return null
   }
 
-  // Auto-advance winner to next bracket slot
   async function advanceWinner(updatedMatch){
-    if(!updatedMatch||!updatedMatch.phase||updatedMatch.phase==='groups') return
+    if(!updatedMatch?.phase||updatedMatch.phase==='groups'||updatedMatch.phase==='tp') return
     const phaseTree=BRACKET_TREE[updatedMatch.phase]
     if(!phaseTree) return
-    // Find index of this match in its phase
     const phaseMatches=matchesRef.current.filter(m=>m.phase===updatedMatch.phase)
     const idx=phaseMatches.findIndex(m=>m.id===updatedMatch.id)
     if(idx<0||idx>=phaseTree.length) return
     const treeEntry=phaseTree[idx]
-    if(!treeEntry) return
     const winner=getWinner(updatedMatch)
     if(!winner) return
-    // Find next match
     const nextMatches=matchesRef.current.filter(m=>m.phase===treeEntry.next)
     const nextMatch=nextMatches[treeEntry.idx]
     if(!nextMatch) return
     const field=treeEntry.pos===0?'t1':'t2'
-    if(nextMatch[field]===winner) return // Already set
+    if(nextMatch[field]===winner) return
     await supabase.from('matches').upsert({
       id:nextMatch.id,phase:nextMatch.phase,grp:null,
       t1:field==='t1'?winner:nextMatch.t1,
       t2:field==='t2'?winner:nextMatch.t2,
-      s1:nextMatch.s1||'',s2:nextMatch.s2||'',
-      pen1:nextMatch.pen1||'',pen2:nextMatch.pen2||''
+      s1:nextMatch.s1||'',s2:nextMatch.s2||'',pen1:nextMatch.pen1||'',pen2:nextMatch.pen2||''
     })
     await loadMatches()
   }
 
-  const updateMatchScore = useCallback(async(id,field,val)=>{
+  // ── MATCH SCORES ──────────────────────────────────────────
+  const updateMatchScore=useCallback(async(id,field,val)=>{
     if(isLocked) return
     setMatches(prev=>prev.map(m=>m.id===id?{...m,[field]:val}:m))
     const m=matchesRef.current.find(x=>x.id===id)
@@ -345,28 +374,25 @@ export default function App(){
       s1:field==='s1'?val:m.s1,s2:field==='s2'?val:m.s2,
       pen1:field==='pen1'?val:m.pen1,pen2:field==='pen2'?val:m.pen2,
     })
-    // Auto-advance winner to next round
-    if(['s1','s2','pen1','pen2'].includes(field)){
-      await advanceWinner(updated)
-    }
+    if(['s1','s2','pen1','pen2'].includes(field)) await advanceWinner(updated)
     setSaving(false)
   },[isLocked])
 
-  const updateKnockoutTeam = useCallback(async(id,field,val)=>{
+  const updateKnockoutTeam=useCallback(async(id,field,val)=>{
     if(!isAdmin||isLocked) return
     setMatches(prev=>prev.map(m=>m.id===id?{...m,[field]:val}:m))
     const m=matchesRef.current.find(x=>x.id===id)
     if(!m) return
     await supabase.from('matches').upsert({
-      id,phase:m.phase,grp:m.grp,
+      id,phase:m.phase,grp:null,
       t1:field==='t1'?val:m.t1,t2:field==='t2'?val:m.t2,
       s1:m.s1,s2:m.s2,pen1:m.pen1,pen2:m.pen2,
     })
   },[isAdmin,isLocked])
 
   // ── QUINIELA ──────────────────────────────────────────────
-  const updateQuiniela = useCallback(async(matchId,field,val)=>{
-    if(tournamentStarted||!nickname) return
+  const updateQuiniela=useCallback(async(matchId,field,val)=>{
+    if(!nickname) return
     setQuiniela(prev=>({...prev,[matchId]:{...(prev[matchId]||{s1:'',s2:''}), [field]:val}}))
     const cur=quiniela[matchId]||{s1:'',s2:''}
     await supabase.from('quiniela').upsert({
@@ -374,69 +400,30 @@ export default function App(){
       s1:field==='s1'?val:cur.s1,
       s2:field==='s2'?val:cur.s2,
     },{onConflict:'nickname,match_id'})
-  },[quiniela,nickname,tournamentStarted])
+  },[quiniela,nickname])
 
   // ── CSV IMPORT ────────────────────────────────────────────
   async function importCSV(file){
     setCsvLoading(true); setCsvMsg('')
-    const text=await file.text()
-    const lines=text.trim().replace(/\r/g,'').split('\n').slice(1)
-    let ok=0,err=0
-    for(const line of lines){
-      const sep=line.includes(';')?';':','
-      const parts=line.split(sep)
-      if(parts.length<6){err++;continue}
-      const [nick,grp,t1,t2,s1,s2]=parts.map(p=>p.trim().replace(/"/g,'').replace(/\r/g,''))
-      if(!nick||!grp||!t1||!t2){err++;continue}
-      const m=matchesRef.current.find(x=>x.grp===grp&&x.t1===t1&&x.t2===t2&&x.phase==='groups')
-      if(!m){err++;continue}
-      await supabase.from('quiniela').upsert({nickname:nick,match_id:m.id,s1:s1||'',s2:s2||''},{onConflict:'nickname,match_id'})
-      ok++
-    }
-    setCsvMsg(`✅ ${ok} pronósticos importados${err>0?` · ⚠️ ${err} líneas con error`:''}`)
-    setCsvLoading(false)
-    loadAllQuinielas()
-  }
-
-  async function autoFillR32(){
-    // Official R32 bracket based on confirmed FIFA 2026 matchups
-    // pos: 0 = group winner, 1 = runner-up, null = third place (manual)
-    const r32Slots = [
-      { t1: {grp:'A', pos:1}, t2: {grp:'B', pos:1} }, // M73: 2A vs 2B
-      { t1: {grp:'E', pos:0}, t2: null },               // M74: 1E vs 3rd
-      { t1: {grp:'F', pos:0}, t2: {grp:'C', pos:1} },  // M75: 1F vs 2C
-      { t1: {grp:'C', pos:0}, t2: {grp:'F', pos:1} },  // M76: 1C vs 2F
-      { t1: {grp:'I', pos:0}, t2: null },               // M77: 1I vs 3rd
-      { t1: {grp:'E', pos:1}, t2: {grp:'I', pos:1} },  // M78: 2E vs 2I
-      { t1: {grp:'A', pos:0}, t2: null },               // M79: 1A vs 3rd
-      { t1: {grp:'L', pos:0}, t2: null },               // M80: 1L vs 3rd
-      { t1: {grp:'D', pos:0}, t2: null },               // M81: 1D vs 3rd
-      { t1: {grp:'G', pos:0}, t2: null },               // M82: 1G vs 3rd
-      { t1: {grp:'K', pos:1}, t2: {grp:'L', pos:1} },  // M83: 2K vs 2L
-      { t1: {grp:'H', pos:0}, t2: {grp:'J', pos:1} },  // M84: 1H vs 2J
-      { t1: {grp:'B', pos:0}, t2: null },               // M85: 1B vs 3rd
-      { t1: {grp:'J', pos:0}, t2: {grp:'H', pos:1} },  // M86: 1J vs 2H
-      { t1: {grp:'K', pos:0}, t2: null },               // M87: 1K vs 3rd
-      { t1: {grp:'D', pos:1}, t2: {grp:'G', pos:1} },  // M88: 2D vs 2G
-    ]
-
-    const r32Matches=matchesRef.current.filter(m=>m.phase==='r32')
-    let updates=0
-    for(let i=0;i<Math.min(r32Slots.length,r32Matches.length);i++){
-      const slot=r32Slots[i]; const match=r32Matches[i]
-      let t1=match.t1, t2=match.t2
-      if(slot.t1){ const g=groupStandings[slot.t1.grp]; if(g&&g[slot.t1.pos]) t1=g[slot.t1.pos][0] }
-      if(slot.t2){ const g=groupStandings[slot.t2.grp]; if(g&&g[slot.t2.pos]) t2=g[slot.t2.pos][0] }
-      if(t1!==match.t1||t2!==match.t2){
-        await supabase.from('matches').upsert({
-          id:match.id,phase:'r32',grp:null,
-          t1,t2,s1:match.s1||'',s2:match.s2||'',pen1:match.pen1||'',pen2:match.pen2||''
-        })
-        updates++
+    try{
+      const text=await file.text()
+      const lines=text.trim().replace(/\r/g,'').split('\n').slice(1)
+      let ok=0,err=0
+      for(const line of lines){
+        const sep=line.includes(';')?';':','
+        const parts=line.split(sep)
+        if(parts.length<6){err++;continue}
+        const [nick,grp,t1,t2,s1,s2]=parts.map(p=>p.trim().replace(/"/g,'').replace(/\r/g,''))
+        if(!nick||!grp||!t1||!t2){err++;continue}
+        const m=matchesRef.current.find(x=>x.grp===grp&&x.t1===t1&&x.t2===t2&&x.phase==='groups')
+        if(!m){err++;continue}
+        await supabase.from('quiniela').upsert({nickname:nick,match_id:m.id,s1:s1||'',s2:s2||''},{onConflict:'nickname,match_id'})
+        ok++
       }
-    }
-    if(updates>0){ await loadMatches(); setCsvMsg(`✅ ${updates} enfrentamientos de R32 actualizados`) }
-    else setCsvMsg('ℹ️ No hay cambios — verifica que los grupos estén completos')
+      setCsvMsg(`✅ ${ok} pronósticos importados${err>0?` · ⚠️ ${err} líneas con error`:''}`)
+      loadAllQuinielas()
+    }catch(e){ setCsvMsg('❌ Error al procesar el archivo') }
+    setCsvLoading(false)
   }
 
   async function saveAdminQuiniela(matchId,field,val){
@@ -444,10 +431,26 @@ export default function App(){
     const cur=allQuinielas.find(r=>r.nickname===adminSelectedNick&&r.match_id===matchId)||{s1:'',s2:''}
     await supabase.from('quiniela').upsert({
       nickname:adminSelectedNick,match_id:matchId,
-      s1:field==='s1'?val:cur.s1,
-      s2:field==='s2'?val:cur.s2,
+      s1:field==='s1'?val:cur.s1,s2:field==='s2'?val:cur.s2,
     },{onConflict:'nickname,match_id'})
     loadAllQuinielas()
+  }
+
+  async function autoFillR32(){
+    const r32Matches=matchesRef.current.filter(m=>m.phase==='r32')
+    let updates=0
+    for(let i=0;i<Math.min(R32_SLOTS.length,r32Matches.length);i++){
+      const slot=R32_SLOTS[i]; const match=r32Matches[i]
+      let t1=match.t1, t2=match.t2
+      if(slot.t1){ const g=groupStandings[slot.t1.grp]; if(g&&g[slot.t1.pos]) t1=g[slot.t1.pos][0] }
+      if(slot.t2){ const g=groupStandings[slot.t2.grp]; if(g&&g[slot.t2.pos]) t2=g[slot.t2.pos][0] }
+      if(t1!==match.t1||t2!==match.t2){
+        await supabase.from('matches').upsert({id:match.id,phase:'r32',grp:null,t1,t2,s1:match.s1||'',s2:match.s2||'',pen1:match.pen1||'',pen2:match.pen2||''})
+        updates++
+      }
+    }
+    if(updates>0){ await loadMatches(); setCsvMsg(`✅ ${updates} enfrentamientos de R32 actualizados`) }
+    else setCsvMsg('ℹ️ No hay cambios — verifica que los grupos estén completos')
   }
 
   // ── AI FETCH ──────────────────────────────────────────────
@@ -463,13 +466,9 @@ export default function App(){
           'anthropic-dangerous-direct-browser-access':'true',
         },
         body:JSON.stringify({
-          model:'claude-sonnet-4-6',max_tokens:2000,
-          tools:[{type:'web_search_20250305',name:'web_search'}],
-          messages:[{role:'user',content:`Busca resultados reales de la Copa del Mundo FIFA 2026 (empieza 11 jun 2026).
-Devuelve SOLO JSON sin markdown:
-Sin partidos: {"played":false,"message":"..."}
-Con partidos: {"played":true,"matches":[{"phase":"groups","grp":"A","t1":"México","t2":"Sudáfrica","s1":2,"s2":0},...]}
-Para eliminatorias usa phase: r32/r16/qf/sf/tp/final y omite grp.`}]
+          model:'claude-sonnet-4-6',max_tokens:500,
+          tools:[{type:'web_search_20250305',name:'web_search',max_uses:2}],
+          messages:[{role:'user',content:'Resultados Copa Mundial FIFA 2026 hoy. SOLO JSON: {"played":true,"matches":[{"phase":"groups","grp":"A","t1":"México","t2":"Sudáfrica","s1":2,"s2":0}]} o {"played":false}'}]
         })
       })
       const data=await res.json()
@@ -478,19 +477,10 @@ Para eliminatorias usa phase: r32/r16/qf/sf/tp/final y omite grp.`}]
       const parsed=JSON.parse(clean)
       if(!parsed.played){ setAiMsg(parsed.message||'Torneo no iniciado.') }
       else if(parsed.matches?.length){
-        // Upsert all matches directly to Supabase
         for(const pm of parsed.matches){
           const m=matchesRef.current.find(x=>x.grp===pm.grp&&x.t1===pm.t1&&x.t2===pm.t2&&x.phase===pm.phase)
-          if(m){
-            await supabase.from('matches').upsert({
-              id:m.id,phase:m.phase,grp:m.grp,
-              t1:m.t1,t2:m.t2,
-              s1:String(pm.s1),s2:String(pm.s2),
-              pen1:m.pen1||'',pen2:m.pen2||''
-            })
-          }
+          if(m) await supabase.from('matches').upsert({id:m.id,phase:m.phase,grp:m.grp,t1:m.t1,t2:m.t2,s1:String(pm.s1),s2:String(pm.s2),pen1:m.pen1||'',pen2:m.pen2||''})
         }
-        // Reload fresh data from Supabase
         const {data:freshData}=await supabase.from('matches').select('*')
         if(freshData){
           setMatches(prev=>prev.map(m=>{
@@ -513,28 +503,34 @@ Para eliminatorias usa phase: r32/r16/qf/sf/tp/final y omite grp.`}]
     return s
   },[matches])
 
-  // ── RANKING ───────────────────────────────────────────────
+  // ── BADGE & RANKING ───────────────────────────────────────
+  function getBadge(match,q){
+    if(!q||q.s1===''||q.s2==='') return null
+    if(match.s1===''||match.s2==='') return null
+    const r1=parseInt(match.s1),r2=parseInt(match.s2)
+    const q1=parseInt(q.s1),q2=parseInt(q.s2)
+    if(isNaN(r1)||isNaN(r2)||isNaN(q1)||isNaN(q2)) return null
+    if(q1===r1&&q2===r2) return{pts:3,color:'#69f0ae',label:'✅ +3'}
+    if(match.phase!=='groups'){
+      const winner=getWinner(match)
+      const qWinner=q1>q2?match.t1:q1<q2?match.t2:null
+      if(winner&&qWinner&&winner===qWinner) return{pts:1,color:'#ffeb3b',label:'🟡 +1'}
+      return{pts:0,color:'#ef5350',label:'❌ +0'}
+    }
+    const rR=r1>r2?'1':r1<r2?'2':'X',qR=q1>q2?'1':q1<q2?'2':'X'
+    if(rR===qR) return{pts:1,color:'#ffeb3b',label:'🟡 +1'}
+    return{pts:0,color:'#ef5350',label:'❌ +0'}
+  }
+
   const ranking=useMemo(()=>{
     const users=[...new Set(allQuinielas.map(r=>r.nickname))]
     return users.map(nick=>{
       let pts=0
       matches.forEach(m=>{
         if(m.s1===''||m.s2==='') return
-        const r1=parseInt(m.s1),r2=parseInt(m.s2)
-        if(isNaN(r1)||isNaN(r2)) return
         const q=allQuinielas.find(r=>r.nickname===nick&&r.match_id===m.id)
-        if(!q||q.s1===''||q.s2==='') return
-        const q1=parseInt(q.s1),q2=parseInt(q.s2)
-        if(isNaN(q1)||isNaN(q2)) return
-        if(q1===r1&&q2===r2){ pts+=3; return }
-        if(m.phase==='groups'){
-          const rR=r1>r2?'1':r1<r2?'2':'X',qR=q1>q2?'1':q1<q2?'2':'X'
-          if(rR===qR) pts++
-        } else {
-          const rW=r1>r2?'1':r1<r2?'2':(m.pen1&&m.pen2?(parseInt(m.pen1)>parseInt(m.pen2)?'1':'2'):null)
-          const qW=q1>q2?'1':q1<q2?'2':(m.pen1&&m.pen2?(parseInt(m.pen1)>parseInt(m.pen2)?'1':'2'):null)
-          if(rW&&qW&&rW===qW) pts++
-        }
+        const badge=getBadge(m,q)
+        if(badge) pts+=badge.pts
       })
       return{nick,pts}
     }).sort((a,b)=>b.pts-a.pts)
@@ -546,31 +542,8 @@ Para eliminatorias usa phase: r32/r16/qf/sf/tp/final y omite grp.`}]
   const playerColor=nick=>PLAYER_COLORS[allNicknames.indexOf(nick)%PLAYER_COLORS.length]
   const playedMatches=matches.filter(m=>m.s1!==''&&m.s2!==''&&!isNaN(parseInt(m.s1))&&!isNaN(parseInt(m.s2)))
   const groupMs=matches.filter(m=>m.grp===activeGroup)
-
-  function getBadge(match,q){
-    if(!q||q.s1===''||q.s2==='') return null
-    if(match.s1===''||match.s2==='') return null
-    const r1=parseInt(match.s1),r2=parseInt(match.s2)
-    const q1=parseInt(q.s1),q2=parseInt(q.s2)
-    if(isNaN(r1)||isNaN(r2)||isNaN(q1)||isNaN(q2)) return null
-    const isKnockout = match.phase !== 'groups'
-    // Exact score (regulation + extra time, NOT penalties)
-    if(q1===r1&&q2===r2) return{pts:3,color:'#69f0ae',label:'✅ +3'}
-    if(isKnockout){
-      // For knockout, winner is determined by penalties if draw
-      const winner=getWinner(match)
-      const qWinner=q1>q2?match.t1:q1<q2?match.t2:null
-      if(winner&&qWinner&&winner===qWinner) return{pts:1,color:'#ffeb3b',label:'🟡 +1'}
-      return{pts:0,color:'#ef5350',label:'❌ +0'}
-    }
-    const rR=r1>r2?'1':r1<r2?'2':'X',qR=q1>q2?'1':q1<q2?'2':'X'
-    if(rR===qR) return{pts:1,color:'#ffeb3b',label:'🟡 +1'}
-    return{pts:0,color:'#ef5350',label:'❌ +0'}
-  }
-
   const getQ=(nick,matchId)=>allQuinielas.find(r=>r.nickname===nick&&r.match_id===matchId)
 
-  // ── ESTADÍSTICAS ──────────────────────────────────────────
   const progressData=useMemo(()=>{
     return playedMatches.map((m,idx)=>{
       const point={label:`P${idx+1}`,idx:idx+1}
@@ -604,17 +577,11 @@ Para eliminatorias usa phase: r32/r16/qf/sf/tp/final y omite grp.`}]
   const winProb=useMemo(()=>{
     if(playerStats.length===0) return{}
     const totalCurrent=playerStats.reduce((s,p)=>s+p.current,0)
-    const totalMax=playerStats.reduce((s,p)=>s+p.max,0)
-    // If no points scored yet, use max possible; otherwise weight heavily towards current points
-    const useMax = totalCurrent===0
-    const scores=playerStats.map(p=>({
-      nick:p.nick,
-      score: useMax ? p.max : (p.current*0.85 + p.max*0.15)
-    }))
+    const useMax=totalCurrent===0
+    const scores=playerStats.map(p=>({nick:p.nick,score:useMax?p.max:(p.current*0.85+p.max*0.15)}))
     const totalScore=scores.reduce((s,p)=>s+p.score,0)
     const probs={}
     scores.forEach(p=>{probs[p.nick]=totalScore>0?Math.round((p.score/totalScore)*100):0})
-    // Fix rounding so total = 100%
     const total=Object.values(probs).reduce((s,v)=>s+v,0)
     if(total!==100&&scores.length>0){
       const sorted=[...scores].sort((a,b)=>b.score-a.score)
@@ -641,53 +608,31 @@ Para eliminatorias usa phase: r32/r16/qf/sf/tp/final y omite grp.`}]
     <div style={{fontFamily:'system-ui',background:'#0a0e1a',minHeight:'100vh',display:'flex',alignItems:'center',justifyContent:'center',color:'#fff'}}>
       <div style={{background:'#0d1b2a',border:'2px solid #1565c0',borderRadius:20,padding:36,width:300,textAlign:'center',boxShadow:'0 8px 32px rgba(0,0,0,0.5)'}}>
         <div style={{fontSize:40,marginBottom:8}}>🏆</div>
-        <div style={{fontSize:20,fontWeight:800,marginBottom:4}}>Quiniela Maldonado-González 2026</div>
-
+        <div style={{fontSize:20,fontWeight:800,marginBottom:4}}>Quiniela Maldonado González - Mundial 2026</div>
         {pinStep==='nick'&&<>
           <div style={{fontSize:13,color:'#90caf9',marginBottom:24}}>Introduce tu nombre para entrar</div>
-          <input value={nickInput} onChange={e=>setNickInput(e.target.value)}
-            onKeyDown={e=>e.key==='Enter'&&nickInput.trim()&&handleNickSubmit()}
-            placeholder="Tu nombre o apodo"
+          <input value={nickInput} onChange={e=>setNickInput(e.target.value)} onKeyDown={e=>e.key==='Enter'&&nickInput.trim()&&handleNickSubmit()} placeholder="Tu nombre o apodo"
             style={{width:'100%',padding:'10px 12px',borderRadius:8,border:'2px solid #37474f',background:'#1e2d3d',color:'#fff',fontSize:16,textAlign:'center',boxSizing:'border-box',marginBottom:14}}/>
-          <button onClick={handleNickSubmit}
-            style={{width:'100%',background:'#1565c0',border:'none',borderRadius:10,padding:12,color:'#fff',fontWeight:800,fontSize:16,cursor:'pointer'}}>
-            ¡Entrar! ⚽
-          </button>
+          <button onClick={handleNickSubmit} style={{width:'100%',background:'#1565c0',border:'none',borderRadius:10,padding:12,color:'#fff',fontWeight:800,fontSize:16,cursor:'pointer'}}>¡Entrar! ⚽</button>
         </>}
-
         {pinStep==='create'&&<>
           <div style={{fontSize:13,color:'#90caf9',marginBottom:8}}>Hola <b>{nickname}</b> 👋</div>
-          <div style={{fontSize:12,color:'#546e7a',marginBottom:20}}>Primera vez aquí. Crea un PIN de 4 dígitos para proteger tu quiniela.</div>
-          <input type="password" maxLength={4} value={pinInput} onChange={e=>setPinInput(e.target.value)}
-            placeholder="PIN de 4 dígitos"
+          <div style={{fontSize:12,color:'#546e7a',marginBottom:20}}>Primera vez aquí. Crea un PIN de 4 dígitos.</div>
+          <input type="password" maxLength={4} value={pinInput} onChange={e=>setPinInput(e.target.value)} placeholder="PIN de 4 dígitos"
             style={{width:'100%',padding:'10px 12px',borderRadius:8,border:'2px solid #37474f',background:'#1e2d3d',color:'#fff',fontSize:20,textAlign:'center',boxSizing:'border-box',marginBottom:10,letterSpacing:8}}/>
-          <input type="password" maxLength={4} value={pinConfirm} onChange={e=>setPinConfirm(e.target.value)}
-            onKeyDown={e=>e.key==='Enter'&&handleCreatePin()}
-            placeholder="Confirmar PIN"
+          <input type="password" maxLength={4} value={pinConfirm} onChange={e=>setPinConfirm(e.target.value)} onKeyDown={e=>e.key==='Enter'&&handleCreatePin()} placeholder="Confirmar PIN"
             style={{width:'100%',padding:'10px 12px',borderRadius:8,border:'2px solid #37474f',background:'#1e2d3d',color:'#fff',fontSize:20,textAlign:'center',boxSizing:'border-box',marginBottom:14,letterSpacing:8}}/>
           {pinErrorMsg&&<div style={{color:'#e53935',fontSize:12,marginBottom:10}}>{pinErrorMsg}</div>}
-          <button onClick={handleCreatePin}
-            style={{width:'100%',background:'#1b5e20',border:'none',borderRadius:10,padding:12,color:'#fff',fontWeight:800,fontSize:16,cursor:'pointer'}}>
-            Crear PIN 🔐
-          </button>
+          <button onClick={handleCreatePin} style={{width:'100%',background:'#1b5e20',border:'none',borderRadius:10,padding:12,color:'#fff',fontWeight:800,fontSize:16,cursor:'pointer'}}>Crear PIN 🔐</button>
         </>}
-
         {pinStep==='verify'&&<>
           <div style={{fontSize:13,color:'#90caf9',marginBottom:8}}>Bienvenido de vuelta, <b>{nickname}</b> 👋</div>
-          <div style={{fontSize:12,color:'#546e7a',marginBottom:20}}>Introduce tu PIN para acceder a tu quiniela.</div>
-          <input type="password" maxLength={4} value={pinAuth} onChange={e=>setPinAuth(e.target.value)}
-            onKeyDown={e=>e.key==='Enter'&&handleVerifyPin()}
-            placeholder="Tu PIN"
+          <div style={{fontSize:12,color:'#546e7a',marginBottom:20}}>Introduce tu PIN.</div>
+          <input type="password" maxLength={4} value={pinAuth} onChange={e=>setPinAuth(e.target.value)} onKeyDown={e=>e.key==='Enter'&&handleVerifyPin()} placeholder="Tu PIN"
             style={{width:'100%',padding:'10px 12px',borderRadius:8,border:`2px solid ${pinErrorMsg?'#e53935':'#37474f'}`,background:'#1e2d3d',color:'#fff',fontSize:20,textAlign:'center',boxSizing:'border-box',marginBottom:14,letterSpacing:8}}/>
           {pinErrorMsg&&<div style={{color:'#e53935',fontSize:12,marginBottom:10}}>{pinErrorMsg}</div>}
-          <button onClick={handleVerifyPin}
-            style={{width:'100%',background:'#1565c0',border:'none',borderRadius:10,padding:12,color:'#fff',fontWeight:800,fontSize:16,cursor:'pointer'}}>
-            Entrar 🔐
-          </button>
-          <button onClick={()=>{setNickname('');setPinStep('nick');setPinErrorMsg('');setPinAuth('')}}
-            style={{width:'100%',background:'transparent',border:'none',color:'#546e7a',fontSize:12,cursor:'pointer',marginTop:8}}>
-            ← Cambiar nombre
-          </button>
+          <button onClick={handleVerifyPin} style={{width:'100%',background:'#1565c0',border:'none',borderRadius:10,padding:12,color:'#fff',fontWeight:800,fontSize:16,cursor:'pointer'}}>Entrar 🔐</button>
+          <button onClick={()=>{setNickname('');setPinStep('nick');setPinErrorMsg('');setPinAuth('')}} style={{width:'100%',background:'transparent',border:'none',color:'#546e7a',fontSize:12,cursor:'pointer',marginTop:8}}>← Cambiar nombre</button>
         </>}
       </div>
     </div>
@@ -702,21 +647,17 @@ Para eliminatorias usa phase: r32/r16/qf/sf/tp/final y omite grp.`}]
         <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.8)',zIndex:100,display:'flex',alignItems:'center',justifyContent:'center'}}>
           <div style={{background:'#0d1b2a',border:'2px solid #1565c0',borderRadius:16,padding:28,width:280,textAlign:'center'}}>
             <div style={{fontSize:20,fontWeight:800,marginBottom:16}}>🔑 Cambiar PIN</div>
-            <input type="password" maxLength={4} value={changePinCurrent} onChange={e=>setChangePinCurrent(e.target.value)}
-              placeholder="PIN actual"
+            <input type="password" maxLength={4} value={changePinCurrent} onChange={e=>setChangePinCurrent(e.target.value)} placeholder="PIN actual"
               style={{width:'100%',padding:'10px 12px',borderRadius:8,border:'2px solid #37474f',background:'#1e2d3d',color:'#fff',fontSize:20,textAlign:'center',boxSizing:'border-box',marginBottom:10,letterSpacing:8}}/>
-            <input type="password" maxLength={4} value={changePinNew} onChange={e=>setChangePinNew(e.target.value)}
-              placeholder="Nuevo PIN"
+            <input type="password" maxLength={4} value={changePinNew} onChange={e=>setChangePinNew(e.target.value)} placeholder="Nuevo PIN"
               style={{width:'100%',padding:'10px 12px',borderRadius:8,border:'2px solid #37474f',background:'#1e2d3d',color:'#fff',fontSize:20,textAlign:'center',boxSizing:'border-box',marginBottom:10,letterSpacing:8}}/>
-            <input type="password" maxLength={4} value={changePinConfirm} onChange={e=>setChangePinConfirm(e.target.value)}
-              placeholder="Confirmar nuevo PIN"
+            <input type="password" maxLength={4} value={changePinConfirm} onChange={e=>setChangePinConfirm(e.target.value)} placeholder="Confirmar nuevo PIN"
               style={{width:'100%',padding:'10px 12px',borderRadius:8,border:'2px solid #37474f',background:'#1e2d3d',color:'#fff',fontSize:20,textAlign:'center',boxSizing:'border-box',marginBottom:14,letterSpacing:8}}/>
             {changePinMsg&&<div style={{fontSize:12,marginBottom:10,color:changePinMsg.startsWith('✅')?'#69f0ae':'#e53935'}}>{changePinMsg}</div>}
             <div style={{display:'flex',gap:8}}>
               <button onClick={()=>{setShowChangePin(false);setChangePinMsg('');setChangePinCurrent('');setChangePinNew('');setChangePinConfirm('')}}
                 style={{flex:1,padding:10,borderRadius:8,border:'none',background:'#263238',color:'#90a4ae',cursor:'pointer',fontWeight:700}}>Cancelar</button>
-              <button onClick={handleChangePin}
-                style={{flex:1,padding:10,borderRadius:8,border:'none',background:'#1565c0',color:'#fff',cursor:'pointer',fontWeight:700}}>Cambiar</button>
+              <button onClick={handleChangePin} style={{flex:1,padding:10,borderRadius:8,border:'none',background:'#1565c0',color:'#fff',cursor:'pointer',fontWeight:700}}>Cambiar</button>
             </div>
           </div>
         </div>
@@ -727,15 +668,13 @@ Para eliminatorias usa phase: r32/r16/qf/sf/tp/final y omite grp.`}]
         <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.8)',zIndex:100,display:'flex',alignItems:'center',justifyContent:'center'}}>
           <div style={{background:'#0d1b2a',border:'2px solid #1565c0',borderRadius:16,padding:28,width:280,textAlign:'center'}}>
             <div style={{fontSize:20,fontWeight:800,marginBottom:16}}>🔐 Administrador</div>
-            <input type="password" value={pin} onChange={e=>setPin(e.target.value)}
-              onKeyDown={e=>e.key==='Enter'&&tryLogin()} placeholder="PIN"
+            <input type="password" value={pin} onChange={e=>setPin(e.target.value)} onKeyDown={e=>e.key==='Enter'&&tryLogin()} placeholder="PIN"
               style={{width:'100%',padding:'10px 12px',borderRadius:8,border:`2px solid ${adminPinError?'#e53935':'#37474f'}`,background:'#1e2d3d',color:'#fff',fontSize:16,textAlign:'center',boxSizing:'border-box'}}/>
             {adminPinError&&<div style={{color:'#e53935',fontSize:12,marginTop:6}}>PIN incorrecto</div>}
             <div style={{display:'flex',gap:8,marginTop:14}}>
               <button onClick={()=>{setShowLogin(false);setAdminPinError(false);setPin('')}}
                 style={{flex:1,padding:10,borderRadius:8,border:'none',background:'#263238',color:'#90a4ae',cursor:'pointer',fontWeight:700}}>Cancelar</button>
-              <button onClick={tryLogin}
-                style={{flex:1,padding:10,borderRadius:8,border:'none',background:'#1565c0',color:'#fff',cursor:'pointer',fontWeight:700}}>Entrar</button>
+              <button onClick={tryLogin} style={{flex:1,padding:10,borderRadius:8,border:'none',background:'#1565c0',color:'#fff',cursor:'pointer',fontWeight:700}}>Entrar</button>
             </div>
           </div>
         </div>
@@ -746,13 +685,10 @@ Para eliminatorias usa phase: r32/r16/qf/sf/tp/final y omite grp.`}]
         <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',maxWidth:900,margin:'0 auto'}}>
           <div style={{fontSize:13,color:'#90caf9',paddingTop:6}}>
             👤 {nickname}
-            <button onClick={()=>setShowChangePin(true)}
-              style={{background:'rgba(255,255,255,0.1)',border:'none',borderRadius:10,padding:'2px 8px',color:'#90caf9',cursor:'pointer',fontSize:10,marginLeft:6}}>
-              🔑 PIN
-            </button>
+            <button onClick={()=>setShowChangePin(true)} style={{background:'rgba(255,255,255,0.1)',border:'none',borderRadius:10,padding:'2px 8px',color:'#90caf9',cursor:'pointer',fontSize:10,marginLeft:6}}>🔑 PIN</button>
           </div>
           <div>
-            <div style={{fontSize:24,fontWeight:800}}>🏆 Quiniela Maldonado-González 2026</div>
+            <div style={{fontSize:24,fontWeight:800}}>🏆 Quiniela Maldonado González - Mundial 2026</div>
             <div style={{fontSize:11,color:'#90caf9',marginBottom:6}}>EE.UU. · Canadá · México • 11 Jun – 19 Jul</div>
           </div>
           <div style={{textAlign:'right',paddingTop:4}}>
@@ -762,10 +698,8 @@ Para eliminatorias usa phase: r32/r16/qf/sf/tp/final y omite grp.`}]
             }
           </div>
         </div>
-
         <div style={{maxWidth:900,margin:'0 auto 6px',display:'flex',justifyContent:'center',gap:8,alignItems:'center',flexWrap:'wrap'}}>
-          {isAdmin&&<button onClick={fetchRealScores} disabled={aiLoading}
-            style={{background:aiLoading?'#37474f':'#f57f17',border:'none',borderRadius:20,padding:'6px 16px',color:'#fff',fontWeight:700,cursor:aiLoading?'not-allowed':'pointer',fontSize:12}}>
+          {isAdmin&&<button onClick={fetchRealScores} disabled={aiLoading} style={{background:aiLoading?'#37474f':'#f57f17',border:'none',borderRadius:20,padding:'6px 16px',color:'#fff',fontWeight:700,cursor:aiLoading?'not-allowed':'pointer',fontSize:12}}>
             {aiLoading?'⏳ Buscando...':'🔄 Actualizar en vivo'}
           </button>}
           {saving&&<span style={{fontSize:11,color:'#a5d6a7'}}>💾 Guardando...</span>}
@@ -773,13 +707,10 @@ Para eliminatorias usa phase: r32/r16/qf/sf/tp/final y omite grp.`}]
           {isAdmin&&<span style={{fontSize:11,background:'#1b5e20',borderRadius:20,padding:'3px 10px',fontWeight:700}}>✅ Admin</span>}
         </div>
         {aiMsg&&<div style={{fontSize:12,color:'#a5d6a7',paddingBottom:6}}>{aiMsg}</div>}
-
         <div style={{display:'flex',justifyContent:'center',gap:3,flexWrap:'wrap',maxWidth:900,margin:'0 auto'}}>
           {TABS.map(t=>(
             <button key={t.id} onClick={()=>setTab(t.id)}
-              style={{background:tab===t.id?'#fff':'transparent',color:tab===t.id?'#1a237e':'#90caf9',
-                border:'2px solid',borderColor:tab===t.id?'#fff':'#5c6bc0',
-                borderRadius:'10px 10px 0 0',padding:'6px 12px',cursor:'pointer',fontWeight:700,fontSize:11}}>
+              style={{background:tab===t.id?'#fff':'transparent',color:tab===t.id?'#1a237e':'#90caf9',border:'2px solid',borderColor:tab===t.id?'#fff':'#5c6bc0',borderRadius:'10px 10px 0 0',padding:'6px 12px',cursor:'pointer',fontWeight:700,fontSize:11}}>
               {t.label}
             </button>
           ))}
@@ -788,14 +719,12 @@ Para eliminatorias usa phase: r32/r16/qf/sf/tp/final y omite grp.`}]
 
       <div style={{padding:16,maxWidth:900,margin:'0 auto'}}>
 
-        {/* SELECTOR GRUPO */}
-        {['grupos','partidos','quiniela','pronosticos','adminpanel'].includes(tab)&&(
+        {/* SELECTOR GRUPO — solo para tabs que lo necesitan */}
+        {['grupos','partidos','pronosticos'].includes(tab)&&(
           <div style={{display:'flex',flexWrap:'wrap',gap:5,marginBottom:14,justifyContent:'center'}}>
             {Object.keys(GROUPS).map(g=>(
               <button key={g} onClick={()=>setActiveGroup(g)}
-                style={{background:activeGroup===g?'#1565c0':'#1e2a3a',border:'2px solid',
-                  borderColor:activeGroup===g?'#42a5f5':'#37474f',borderRadius:8,padding:'4px 11px',
-                  color:activeGroup===g?'#fff':'#90caf9',cursor:'pointer',fontWeight:700,fontSize:12}}>
+                style={{background:activeGroup===g?'#1565c0':'#1e2a3a',border:'2px solid',borderColor:activeGroup===g?'#42a5f5':'#37474f',borderRadius:8,padding:'4px 11px',color:activeGroup===g?'#fff':'#90caf9',cursor:'pointer',fontWeight:700,fontSize:12}}>
                 Grupo {g}
               </button>
             ))}
@@ -835,9 +764,9 @@ Para eliminatorias usa phase: r32/r16/qf/sf/tp/final y omite grp.`}]
           </div>
         )}
 
-        {/* ── PARTIDOS ── */}
+        {/* ── PARTIDOS (solo admin) ── */}
         {tab==='partidos'&&isAdmin&&groupMs.map(m=>(
-          <MatchRow key={m.id} m={m} onScore={updateMatchScore} locked={isLocked} isAdmin={isAdmin}/>
+          <MatchRow key={m.id} m={m} onScore={updateMatchScore} locked={isLocked}/>
         ))}
 
         {/* ── ELIMINATORIAS ── */}
@@ -845,9 +774,7 @@ Para eliminatorias usa phase: r32/r16/qf/sf/tp/final y omite grp.`}]
           const ms=matches.filter(m=>m.phase===phase)
           return(
             <div key={phase} style={{marginBottom:16}}>
-              <div style={{fontWeight:800,fontSize:13,color:PHASE_COLORS[phase],borderLeft:`3px solid ${PHASE_COLORS[phase]}`,paddingLeft:10,marginBottom:8}}>
-                {PHASE_LABELS[phase]}
-              </div>
+              <div style={{fontWeight:800,fontSize:13,color:PHASE_COLORS[phase],borderLeft:`3px solid ${PHASE_COLORS[phase]}`,paddingLeft:10,marginBottom:8}}>{PHASE_LABELS[phase]}</div>
               {ms.map(m=>(
                 <div key={m.id} style={{background:'#0d1b2a',borderRadius:10,padding:'10px 12px',border:'1px solid #1e3a5f',marginBottom:6,opacity:m.t1?1:0.4}}>
                   <div style={{display:'flex',alignItems:'center',gap:8,flexWrap:'wrap'}}>
@@ -889,9 +816,7 @@ Para eliminatorias usa phase: r32/r16/qf/sf/tp/final y omite grp.`}]
             <div style={{display:'flex',gap:10,minWidth:1100,alignItems:'flex-start'}}>
               {PHASE_ORDER.filter(p=>p!=='tp').map(phase=>(
                 <div key={phase} style={{minWidth:165,flex:'0 0 auto'}}>
-                  <div style={{textAlign:'center',fontWeight:700,fontSize:11,color:PHASE_COLORS[phase],background:'rgba(0,0,0,0.3)',borderRadius:8,padding:'4px 8px',marginBottom:8}}>
-                    {PHASE_LABELS[phase]}
-                  </div>
+                  <div style={{textAlign:'center',fontWeight:700,fontSize:11,color:PHASE_COLORS[phase],background:'rgba(0,0,0,0.3)',borderRadius:8,padding:'4px 8px',marginBottom:8}}>{PHASE_LABELS[phase]}</div>
                   {matches.filter(m=>m.phase===phase).map(m=>(
                     <div key={m.id} style={{background:'#0d1b2a',border:'1px solid #1e3a5f',borderRadius:8,padding:'8px 10px',marginBottom:8,fontSize:12}}>
                       <div style={{display:'flex',justifyContent:'space-between',marginBottom:2}}>
@@ -911,13 +836,7 @@ Para eliminatorias usa phase: r32/r16/qf/sf/tp/final y omite grp.`}]
             {(()=>{
               const f=matches.find(m=>m.phase==='final')
               if(!f||(!f.s1&&!f.s2)) return null
-              const g1=parseInt(f.s1),g2=parseInt(f.s2)
-              let champ=''
-              if(!isNaN(g1)&&!isNaN(g2)){
-                if(g1>g2) champ=f.t1
-                else if(g2>g1) champ=f.t2
-                else if(f.pen1&&f.pen2) champ=parseInt(f.pen1)>parseInt(f.pen2)?f.t1:f.t2
-              }
+              const champ=getWinner(f)
               if(!champ) return null
               return(
                 <div style={{textAlign:'center',marginTop:20,background:'linear-gradient(135deg,#f57f17,#f9a825)',borderRadius:16,padding:'16px 24px'}}>
@@ -937,120 +856,88 @@ Para eliminatorias usa phase: r32/r16/qf/sf/tp/final y omite grp.`}]
             <div style={{display:'flex',flexWrap:'wrap',gap:6,marginBottom:14,justifyContent:'center'}}>
               {[
                 {id:'groups',label:'⚽ Grupos'},
-                {id:'r32',label:'🔥 Ronda 32'},
+                {id:'r32',label:'🔥 R32'},
                 {id:'r16',label:'⚔️ Octavos'},
                 {id:'qf',label:'🏅 Cuartos'},
                 {id:'sf',label:'🌟 Semis'},
                 {id:'final',label:'🏆 Final'},
               ].map(p=>{
-                const lockDate=PHASE_LOCK_DATES[p.id]
-                const isLocked=now>=lockDate&&!isAdmin
-                const hasMatches=p.id==='groups'
-                  ? true
-                  : matches.filter(m=>m.phase===p.id&&m.t1).length>0
+                const open=isPhaseOpen(p.id)
+                const hasTeams=p.id==='groups'?true:matches.filter(m=>m.phase===p.id&&m.t1).length>0
                 return(
                   <button key={p.id} onClick={()=>setQuinielaPhase(p.id)}
-                    style={{background:quinielaPhase===p.id?'#7b1fa2':'#1e2a3a',border:'2px solid',
-                      borderColor:quinielaPhase===p.id?'#ce93d8':'#37474f',borderRadius:8,padding:'5px 12px',
-                      color:quinielaPhase===p.id?'#fff':hasMatches?'#90caf9':'#37474f',
-                      cursor:'pointer',fontWeight:700,fontSize:11,
-                      opacity:hasMatches?1:0.5}}>
-                    {p.label}{isLocked?' 🔒':''}
+                    style={{background:quinielaPhase===p.id?'#7b1fa2':'#1e2a3a',border:'2px solid',borderColor:quinielaPhase===p.id?'#ce93d8':'#37474f',borderRadius:8,padding:'5px 12px',color:quinielaPhase===p.id?'#fff':hasTeams?'#90caf9':'#37474f',cursor:'pointer',fontWeight:700,fontSize:11,opacity:hasTeams?1:0.5}}>
+                    {p.label}{!open&&hasTeams?' 🔒':''}
                   </button>
                 )
               })}
             </div>
 
-            {/* Quiniela de grupos */}
+            {/* Quiniela grupos */}
             {quinielaPhase==='groups'&&(
               <div>
-                {/* Selector de grupo */}
                 <div style={{display:'flex',flexWrap:'wrap',gap:5,marginBottom:12,justifyContent:'center'}}>
                   {Object.keys(GROUPS).map(g=>(
                     <button key={g} onClick={()=>setActiveGroup(g)}
-                      style={{background:activeGroup===g?'#1565c0':'#1e2a3a',border:'2px solid',
-                        borderColor:activeGroup===g?'#42a5f5':'#37474f',borderRadius:8,padding:'4px 11px',
-                        color:activeGroup===g?'#fff':'#90caf9',cursor:'pointer',fontWeight:700,fontSize:12}}>
+                      style={{background:activeGroup===g?'#1565c0':'#1e2a3a',border:'2px solid',borderColor:activeGroup===g?'#42a5f5':'#37474f',borderRadius:8,padding:'4px 11px',color:activeGroup===g?'#fff':'#90caf9',cursor:'pointer',fontWeight:700,fontSize:12}}>
                       Grupo {g}
                     </button>
                   ))}
                 </div>
-                {now>=LOCK_DATE&&!isAdmin&&(
-                  <div style={{background:'#b71c1c',borderRadius:10,padding:'10px 14px',fontSize:13,color:'#ffcdd2',marginBottom:12}}>
-                    🔒 La quiniela de grupos está cerrada.
-                  </div>
-                )}
-                {!tournamentStarted&&(
-                  <div style={{background:'#1a2744',borderRadius:10,padding:'10px 14px',fontSize:13,color:'#90caf9',marginBottom:12}}>
-                    🎯 Tus pronósticos se guardan automáticamente. Cierra el <b>11 de junio</b>.<br/>
-                    +3 pts resultado exacto · +1 pt ganador correcto
-                  </div>
-                )}
+                {!isPhaseOpen('groups')&&<div style={{background:'#b71c1c',borderRadius:10,padding:'10px 14px',fontSize:13,color:'#ffcdd2',marginBottom:12}}>🔒 La quiniela de grupos está cerrada.</div>}
+                {isPhaseOpen('groups')&&!tournamentStarted&&<div style={{background:'#1a2744',borderRadius:10,padding:'10px 14px',fontSize:13,color:'#90caf9',marginBottom:12}}>🎯 Tus pronósticos se guardan automáticamente. +3 pts exacto · +1 pt ganador</div>}
                 {groupMs.map(m=>{
                   const q=quiniela[m.id]||{s1:'',s2:''}
-                  const hasReal=m.s1!==''&&m.s2!==''
+                  const locked=!isPhaseOpen('groups')
                   const badge=getBadge(m,q)
                   return(
                     <div key={m.id} style={{background:'#0d1b2a',borderRadius:10,padding:'10px 12px',border:'1px solid #1e3a5f',marginBottom:6}}>
                       <div style={{display:'flex',alignItems:'center',gap:8,flexWrap:'wrap'}}>
                         <div style={{flex:1,textAlign:'right',fontSize:13,fontWeight:600}}>{F(m.t1)}</div>
                         <div style={{display:'flex',alignItems:'center',gap:4}}>
-                          <ScoreInput val={q.s1} onChange={v=>updateQuiniela(m.id,'s1',v)} locked={now>=LOCK_DATE&&!isAdmin} w={40} color='#ce93d8'/>
+                          <ScoreInput val={q.s1} onChange={v=>updateQuiniela(m.id,'s1',v)} locked={locked} w={40} color='#ce93d8'/>
                           <span style={{color:'#546e7a'}}>–</span>
-                          <ScoreInput val={q.s2} onChange={v=>updateQuiniela(m.id,'s2',v)} locked={now>=LOCK_DATE&&!isAdmin} w={40} color='#ce93d8'/>
+                          <ScoreInput val={q.s2} onChange={v=>updateQuiniela(m.id,'s2',v)} locked={locked} w={40} color='#ce93d8'/>
                         </div>
                         <div style={{flex:1,textAlign:'left',fontSize:13,fontWeight:600}}>{F(m.t2)}</div>
                       </div>
-                      {hasReal&&<div style={{textAlign:'center',marginTop:4,fontSize:11,color:'#78909c'}}>Real: {m.s1}–{m.s2} {badge&&<span style={{color:badge.color}}>{badge.label}</span>}</div>}
+                      {m.s1!==''&&m.s2!==''&&<div style={{textAlign:'center',marginTop:4,fontSize:11,color:'#78909c'}}>Real: {m.s1}–{m.s2} {badge&&<span style={{color:badge.color}}>{badge.label}</span>}</div>}
                     </div>
                   )
                 })}
               </div>
             )}
 
-            {/* Quiniela de fases eliminatorias */}
+            {/* Quiniela fases eliminatorias */}
             {quinielaPhase!=='groups'&&(()=>{
               const phaseMatches=matches.filter(m=>m.phase===quinielaPhase&&m.t1)
-              const lockDate=PHASE_LOCK_DATES[quinielaPhase]
-              const phaseLocked=now>=lockDate&&!isAdmin
-              const phaseLabel={r32:'Ronda de 32',r16:'Octavos de Final',qf:'Cuartos de Final',sf:'Semifinales',final:'Gran Final'}
-
+              const open=isPhaseOpen(quinielaPhase)
+              const label=PHASE_NAMES[quinielaPhase]
               if(phaseMatches.length===0) return(
                 <div style={{textAlign:'center',color:'#546e7a',padding:30,fontSize:13,background:'#0d1b2a',borderRadius:12,border:'1px solid #1e3a5f'}}>
-                  ⏳ Los equipos de {phaseLabel[quinielaPhase]} aún no están definidos.<br/>
-                  <span style={{fontSize:11,marginTop:8,display:'block'}}>Se habilitará cuando el admin introduzca los equipos en la pestaña 🏆 Eliminatorias.</span>
+                  ⏳ Los equipos de {label} aún no están definidos.<br/>
+                  <span style={{fontSize:11,marginTop:8,display:'block'}}>Se habilitará cuando el admin introduzca los equipos en 🏆 Eliminatorias.</span>
                 </div>
               )
-
               return(
                 <div>
-                  {phaseLocked&&(
-                    <div style={{background:'#b71c1c',borderRadius:10,padding:'10px 14px',fontSize:13,color:'#ffcdd2',marginBottom:12}}>
-                      🔒 La quiniela de {phaseLabel[quinielaPhase]} está cerrada.
-                    </div>
-                  )}
-                  {!phaseLocked&&(
-                    <div style={{background:'#1a2744',borderRadius:10,padding:'10px 14px',fontSize:13,color:'#90caf9',marginBottom:12}}>
-                      🎯 {phaseLabel[quinielaPhase]} — Pronóstica el marcador.<br/>
-                      +3 pts marcador exacto · +1 pt ganador correcto
-                    </div>
-                  )}
+                  {!open&&<div style={{background:'#b71c1c',borderRadius:10,padding:'10px 14px',fontSize:13,color:'#ffcdd2',marginBottom:12}}>🔒 La quiniela de {label} está cerrada.</div>}
+                  {open&&<div style={{background:'#1a2744',borderRadius:10,padding:'10px 14px',fontSize:13,color:'#90caf9',marginBottom:12}}>🎯 {label} — +3 pts marcador exacto · +1 pt ganador</div>}
                   {phaseMatches.map(m=>{
                     const q=quiniela[m.id]||{s1:'',s2:''}
-                    const hasReal=m.s1!==''&&m.s2!==''
                     const badge=getBadge(m,q)
                     return(
                       <div key={m.id} style={{background:'#0d1b2a',borderRadius:10,padding:'12px',border:'1px solid #1e3a5f',marginBottom:8}}>
                         <div style={{display:'flex',alignItems:'center',gap:8,flexWrap:'wrap'}}>
                           <div style={{flex:1,textAlign:'right',fontSize:13,fontWeight:600}}>{F(m.t1)}</div>
                           <div style={{display:'flex',alignItems:'center',gap:4}}>
-                            <ScoreInput val={q.s1} onChange={v=>updateQuiniela(m.id,'s1',v)} locked={phaseLocked} w={40} color='#ce93d8'/>
+                            <ScoreInput val={q.s1} onChange={v=>updateQuiniela(m.id,'s1',v)} locked={!open} w={40} color='#ce93d8'/>
                             <span style={{color:'#546e7a'}}>–</span>
-                            <ScoreInput val={q.s2} onChange={v=>updateQuiniela(m.id,'s2',v)} locked={phaseLocked} w={40} color='#ce93d8'/>
+                            <ScoreInput val={q.s2} onChange={v=>updateQuiniela(m.id,'s2',v)} locked={!open} w={40} color='#ce93d8'/>
                           </div>
                           <div style={{flex:1,textAlign:'left',fontSize:13,fontWeight:600}}>{F(m.t2)}</div>
                         </div>
-                        {hasReal&&<div style={{textAlign:'center',marginTop:4,fontSize:11,color:'#78909c'}}>Real: {m.s1}–{m.s2}{m.pen1?` (Pen ${m.pen1}-${m.pen2})`:''} {badge&&<span style={{color:badge.color}}>{badge.label}</span>}</div>}
+                        {m.s1!==''&&m.s2!==''&&<div style={{textAlign:'center',marginTop:4,fontSize:11,color:'#78909c'}}>Real: {m.s1}–{m.s2}{m.pen1?` (Pen ${m.pen1}-${m.pen2})`:''} {badge&&<span style={{color:badge.color}}>{badge.label}</span>}</div>}
                       </div>
                     )
                   })}
@@ -1063,12 +950,8 @@ Para eliminatorias usa phase: r32/r16/qf/sf/tp/final y omite grp.`}]
         {/* ── RANKING ── */}
         {tab==='ranking'&&(
           <div style={{background:'#0d1b2a',borderRadius:12,overflow:'hidden',border:'1px solid #1e3a5f'}}>
-            <div style={{background:'linear-gradient(90deg,#f57f17,#f9a825)',padding:'10px 16px',fontWeight:800,fontSize:14,color:'#1a1a1a'}}>
-              🥇 Clasificación de la Quiniela
-            </div>
-            {ranking.length===0&&(
-              <div style={{padding:20,textAlign:'center',color:'#546e7a',fontSize:13}}>Aún no hay participantes con pronósticos.</div>
-            )}
+            <div style={{background:'linear-gradient(90deg,#f57f17,#f9a825)',padding:'10px 16px',fontWeight:800,fontSize:14,color:'#1a1a1a'}}>🥇 Clasificación de la Quiniela</div>
+            {ranking.length===0&&<div style={{padding:20,textAlign:'center',color:'#546e7a',fontSize:13}}>Aún no hay participantes.</div>}
             {ranking.map(({nick,pts},i)=>(
               <div key={nick} style={{display:'flex',alignItems:'center',gap:12,padding:'10px 16px',borderTop:'1px solid #1e3a5f',background:nick===nickname?'rgba(21,101,192,0.2)':'transparent'}}>
                 <span style={{fontWeight:800,fontSize:18,width:28,textAlign:'center',color:i===0?'#ffd600':i===1?'#b0bec5':i===2?'#ff8a65':'#546e7a'}}>
@@ -1085,7 +968,7 @@ Para eliminatorias usa phase: r32/r16/qf/sf/tp/final y omite grp.`}]
         {tab==='pronosticos'&&(
           <div>
             {allNicknames.length===0?(
-              <div style={{textAlign:'center',color:'#546e7a',padding:30,fontSize:13}}>Aún no hay participantes con pronósticos.</div>
+              <div style={{textAlign:'center',color:'#546e7a',padding:30,fontSize:13}}>Aún no hay participantes.</div>
             ):(
               <div>
                 <div style={{display:'flex',gap:8,marginBottom:16,justifyContent:'center'}}>
@@ -1096,7 +979,6 @@ Para eliminatorias usa phase: r32/r16/qf/sf/tp/final y omite grp.`}]
                     </button>
                   ))}
                 </div>
-
                 {pronView==='tabla'&&(
                   <div style={{overflowX:'auto'}}>
                     <table style={{width:'100%',borderCollapse:'collapse',fontSize:12,minWidth:Math.max(400,allNicknames.length*55)}}>
@@ -1126,7 +1008,7 @@ Para eliminatorias usa phase: r32/r16/qf/sf/tp/final y omite grp.`}]
                                   {q&&q.s1!==''&&q.s2!==''?(
                                     <div>
                                       <div style={{fontWeight:700,color:'#fff'}}>{q.s1}–{q.s2}</div>
-                                      {badge&&<div style={{fontSize:11,color:badge.color}}>{badge.label} +{badge.pts}</div>}
+                                      {badge&&<div style={{fontSize:11,color:badge.color}}>{badge.label}</div>}
                                     </div>
                                   ):<span style={{color:'#37474f'}}>—</span>}
                                 </td>
@@ -1138,7 +1020,6 @@ Para eliminatorias usa phase: r32/r16/qf/sf/tp/final y omite grp.`}]
                     </table>
                   </div>
                 )}
-
                 {pronView==='perfil'&&(
                   <div>
                     <div style={{display:'flex',flexWrap:'wrap',gap:6,marginBottom:16,justifyContent:'center'}}>
@@ -1150,12 +1031,11 @@ Para eliminatorias usa phase: r32/r16/qf/sf/tp/final y omite grp.`}]
                       ))}
                     </div>
                     {selectedNick&&(()=>{
-                      let total=0,exactos=0,parciales=0,fallos=0
+                      let exactos=0,parciales=0,fallos=0
                       matches.forEach(m=>{
                         const q=getQ(selectedNick,m.id)
                         const badge=getBadge(m,q)
                         if(!badge) return
-                        total++
                         if(badge.pts===3) exactos++
                         else if(badge.pts===1) parciales++
                         else fallos++
@@ -1190,7 +1070,7 @@ Para eliminatorias usa phase: r32/r16/qf/sf/tp/final y omite grp.`}]
                                     {q&&q.s1!==''&&q.s2!==''?(
                                       <div>
                                         <div style={{fontWeight:800,fontSize:16,color:'#ce93d8'}}>{q.s1}–{q.s2}</div>
-                                        {badge&&<div style={{fontSize:11,color:badge.color}}>{badge.label} +{badge.pts} pts</div>}
+                                        {badge&&<div style={{fontSize:11,color:badge.color}}>{badge.label}</div>}
                                         {m.s1!==''&&m.s2!==''&&<div style={{fontSize:10,color:'#546e7a'}}>Real: {m.s1}–{m.s2}</div>}
                                       </div>
                                     ):<span style={{color:'#37474f',fontSize:13}}>Sin pronóstico</span>}
@@ -1218,17 +1098,6 @@ Para eliminatorias usa phase: r32/r16/qf/sf/tp/final y omite grp.`}]
             ):(
               <div>
                 <div style={{background:'#0d1b2a',borderRadius:12,padding:16,border:'1px solid #1e3a5f',marginBottom:16}}>
-              <div style={{fontWeight:800,fontSize:14,color:'#69f0ae',marginBottom:8}}>🏆 Rellenar Ronda de 32 automáticamente</div>
-              <div style={{fontSize:12,color:'#546e7a',marginBottom:12}}>
-                Rellena los enfrentamientos conocidos (1° y 2° de cada grupo) basándose en las clasificaciones actuales. Los terceros clasificados deben introducirse manualmente.
-              </div>
-              <button onClick={autoFillR32}
-                style={{background:'#1b5e20',border:'none',borderRadius:10,padding:'10px 20px',color:'#fff',fontWeight:700,cursor:'pointer',fontSize:13}}>
-                ⚡ Rellenar clasificados automáticamente
-              </button>
-            </div>
-
-            <div style={{background:'#0d1b2a',borderRadius:12,padding:16,border:'1px solid #1e3a5f',marginBottom:16}}>
                   <div style={{fontWeight:800,fontSize:13,color:'#42a5f5',marginBottom:12}}>📊 Puntos actuales vs Máximo posible</div>
                   {playerStats.map(({nick,current,max})=>(
                     <div key={nick} style={{marginBottom:12}}>
@@ -1244,10 +1113,9 @@ Para eliminatorias usa phase: r32/r16/qf/sf/tp/final y omite grp.`}]
                     </div>
                   ))}
                 </div>
-
                 <div style={{background:'#0d1b2a',borderRadius:12,padding:16,border:'1px solid #1e3a5f',marginBottom:16}}>
-                  <div style={{fontWeight:800,fontSize:13,color:'#ffca28',marginBottom:4}}>🎲 Probabilidad de ganar la quiniela</div>
-                  <div style={{fontSize:11,color:'#546e7a',marginBottom:12}}>Basada en puntos máximos alcanzables</div>
+                  <div style={{fontWeight:800,fontSize:13,color:'#ffca28',marginBottom:4}}>🎲 Probabilidad de ganar</div>
+                  <div style={{fontSize:11,color:'#546e7a',marginBottom:12}}>Basada en puntos actuales y máximos alcanzables</div>
                   <div style={{display:'flex',flexWrap:'wrap',gap:8,justifyContent:'center',marginBottom:12}}>
                     {playerStats.map(({nick})=>(
                       <div key={nick} style={{textAlign:'center',background:'#1e2a3a',borderRadius:10,padding:'10px 14px',minWidth:80}}>
@@ -1264,14 +1132,13 @@ Para eliminatorias usa phase: r32/r16/qf/sf/tp/final y omite grp.`}]
                     ))}
                   </div>
                 </div>
-
-                <div style={{background:'#0d1b2a',borderRadius:12,padding:16,border:'1px solid #1e3a5f',marginBottom:16}}>
+                <div style={{background:'#0d1b2a',borderRadius:12,padding:16,border:'1px solid #1e3a5f'}}>
                   <div style={{fontWeight:800,fontSize:13,color:'#69f0ae',marginBottom:12}}>📈 Progreso partido a partido</div>
                   {progressData.length===0?(
                     <div style={{textAlign:'center',color:'#546e7a',fontSize:12,padding:20}}>Disponible cuando haya resultados reales</div>
                   ):(
                     <div style={{overflowX:'auto'}}>
-                      <div style={{minWidth:Math.max(300,progressData.length*60),position:'relative'}}>
+                      <div style={{minWidth:Math.max(300,progressData.length*60)}}>
                         <div style={{display:'flex',flexWrap:'wrap',gap:8,marginBottom:12}}>
                           {allNicknames.map(nick=>(
                             <div key={nick} style={{display:'flex',alignItems:'center',gap:4,fontSize:11}}>
@@ -1303,15 +1170,12 @@ Para eliminatorias usa phase: r32/r16/qf/sf/tp/final y omite grp.`}]
                                 return(
                                   <g key={nick}>
                                     <path d={path} fill="none" stroke={playerColor(nick)} strokeWidth="2.5" strokeLinejoin="round"/>
-                                    {pts.map((v,i)=>(
-                                      <circle key={i} cx={x(i)} cy={y(v)} r="4" fill={playerColor(nick)} stroke="#0a0e1a" strokeWidth="1.5"/>
-                                    ))}
+                                    {pts.map((v,i)=>(<circle key={i} cx={x(i)} cy={y(v)} r="4" fill={playerColor(nick)} stroke="#0a0e1a" strokeWidth="1.5"/>))}
                                   </g>
                                 )
                               })}
                               {progressData.map((d,i)=>(
-                                <text key={i} x={x(i)} y={H-PAD.b+14} fontSize="8" fill="#546e7a" textAnchor="middle"
-                                  transform={`rotate(-30,${x(i)},${H-PAD.b+14})`}>P{i+1}</text>
+                                <text key={i} x={x(i)} y={H-PAD.b+14} fontSize="8" fill="#546e7a" textAnchor="middle" transform={`rotate(-30,${x(i)},${H-PAD.b+14})`}>P{i+1}</text>
                               ))}
                             </svg>
                           )
@@ -1328,6 +1192,33 @@ Para eliminatorias usa phase: r32/r16/qf/sf/tp/final y omite grp.`}]
         {/* ── ADMIN PANEL ── */}
         {tab==='adminpanel'&&isAdmin&&(
           <div>
+            {/* Control de quinielas por fase */}
+            <div style={{background:'#0d1b2a',borderRadius:12,padding:16,border:'1px solid #1e3a5f',marginBottom:16}}>
+              <div style={{fontWeight:800,fontSize:14,color:'#ce93d8',marginBottom:8}}>🔓 Control de quinielas por fase</div>
+              <div style={{fontSize:11,color:'#546e7a',marginBottom:12}}>Abre o cierra manualmente la quiniela de cada fase.</div>
+              {['groups','r32','r16','qf','sf','final'].map(phase=>{
+                const autoLocked=now>=PHASE_LOCK_DATES[phase]
+                const unlocked=manualUnlock[phase]||false
+                const isOpen=!autoLocked||unlocked
+                return(
+                  <div key={phase} style={{display:'flex',alignItems:'center',justifyContent:'space-between',padding:'8px 12px',background:'#0d2137',borderRadius:8,marginBottom:6}}>
+                    <div>
+                      <span style={{color:'#fff',fontWeight:700,fontSize:13}}>{PHASE_NAMES[phase]}</span>
+                      <span style={{fontSize:11,color:isOpen?'#69f0ae':'#e57373',marginLeft:8}}>{isOpen?'🟢 Abierta':'🔴 Cerrada'}</span>
+                    </div>
+                    {autoLocked
+                      ?<button onClick={()=>togglePhaseUnlock(phase)}
+                          style={{background:unlocked?'#b71c1c':'#1b5e20',border:'none',borderRadius:8,padding:'5px 12px',color:'#fff',fontWeight:700,cursor:'pointer',fontSize:11}}>
+                          {unlocked?'🔒 Cerrar':'🔓 Abrir'}
+                        </button>
+                      :<span style={{fontSize:11,color:'#546e7a'}}>Auto</span>
+                    }
+                  </div>
+                )
+              })}
+            </div>
+
+            {/* Rellenar R32 */}
             <div style={{background:'#0d1b2a',borderRadius:12,padding:16,border:'1px solid #1e3a5f',marginBottom:16}}>
               <div style={{fontWeight:800,fontSize:14,color:'#69f0ae',marginBottom:8}}>🏆 Rellenar Ronda de 32 automáticamente</div>
               <div style={{fontSize:12,color:'#546e7a',marginBottom:12}}>Rellena los enfrentamientos conocidos. Los terceros se introducen manualmente.</div>
@@ -1337,19 +1228,18 @@ Para eliminatorias usa phase: r32/r16/qf/sf/tp/final y omite grp.`}]
               </button>
             </div>
 
+            {/* CSV Import */}
             <div style={{background:'#0d1b2a',borderRadius:12,padding:16,border:'1px solid #1e3a5f',marginBottom:16}}>
               <div style={{fontWeight:800,fontSize:14,color:'#f57f17',marginBottom:8}}>📥 Importar quiniela desde CSV</div>
-              <div style={{fontSize:12,color:'#546e7a',marginBottom:12}}>
-                Formato: <code style={{color:'#90caf9'}}>nickname,grupo,equipo1,equipo2,goles1,goles2</code>
-              </div>
+              <div style={{fontSize:12,color:'#546e7a',marginBottom:12}}>Formato: <code style={{color:'#90caf9'}}>nickname,grupo,equipo1,equipo2,goles1,goles2</code></div>
               <input type="file" accept=".csv" onChange={e=>e.target.files[0]&&importCSV(e.target.files[0])} style={{display:'none'}} id="csvInput"/>
-              <label htmlFor="csvInput"
-                style={{display:'inline-block',background:'#f57f17',border:'none',borderRadius:10,padding:'10px 20px',color:'#fff',fontWeight:700,cursor:'pointer',fontSize:13}}>
+              <label htmlFor="csvInput" style={{display:'inline-block',background:'#f57f17',border:'none',borderRadius:10,padding:'10px 20px',color:'#fff',fontWeight:700,cursor:'pointer',fontSize:13}}>
                 {csvLoading?'⏳ Importando...':'📂 Seleccionar archivo CSV'}
               </label>
               {csvMsg&&<div style={{marginTop:10,fontSize:13,color:csvMsg.startsWith('✅')?'#69f0ae':'#ffeb3b'}}>{csvMsg}</div>}
             </div>
 
+            {/* Editar quiniela de jugador */}
             <div style={{background:'#0d1b2a',borderRadius:12,padding:16,border:'1px solid #1e3a5f'}}>
               <div style={{fontWeight:800,fontSize:14,color:'#42a5f5',marginBottom:12}}>✏️ Editar quiniela de un jugador</div>
               <div style={{display:'flex',flexWrap:'wrap',gap:6,marginBottom:14}}>
@@ -1359,14 +1249,19 @@ Para eliminatorias usa phase: r32/r16/qf/sf/tp/final y omite grp.`}]
                     {nick}
                   </button>
                 ))}
-                <input placeholder="+ Nuevo nickname"
-                  onKeyDown={e=>{if(e.key==='Enter'&&e.target.value.trim()){setAdminSelectedNick(e.target.value.trim());e.target.value=''}}}
+                <input placeholder="+ Nuevo nickname" onKeyDown={e=>{if(e.key==='Enter'&&e.target.value.trim()){setAdminSelectedNick(e.target.value.trim());e.target.value=''}}}
                   style={{background:'#1e2d3d',border:'2px solid #37474f',borderRadius:20,padding:'5px 14px',color:'#fff',fontSize:12,width:140}}/>
               </div>
               {adminSelectedNick&&(
                 <div>
-                  <div style={{fontSize:13,color:'#90caf9',marginBottom:10}}>
-                    Editando: <b style={{color:'#fff'}}>{adminSelectedNick}</b>
+                  <div style={{fontSize:13,color:'#90caf9',marginBottom:10}}>Editando: <b style={{color:'#fff'}}>{adminSelectedNick}</b></div>
+                  <div style={{display:'flex',flexWrap:'wrap',gap:5,marginBottom:12,justifyContent:'center'}}>
+                    {Object.keys(GROUPS).map(g=>(
+                      <button key={g} onClick={()=>setActiveGroup(g)}
+                        style={{background:activeGroup===g?'#1565c0':'#1e2a3a',border:'2px solid',borderColor:activeGroup===g?'#42a5f5':'#37474f',borderRadius:8,padding:'4px 11px',color:activeGroup===g?'#fff':'#90caf9',cursor:'pointer',fontWeight:700,fontSize:12}}>
+                        Grupo {g}
+                      </button>
+                    ))}
                   </div>
                   {groupMs.map(m=>{
                     const q=allQuinielas.find(r=>r.nickname===adminSelectedNick&&r.match_id===m.id)||{s1:'',s2:''}
