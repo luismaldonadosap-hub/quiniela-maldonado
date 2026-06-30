@@ -511,17 +511,11 @@ export default function App(){
     const q1=parseInt(q.s1),q2=parseInt(q.s2)
     if(isNaN(r1)||isNaN(r2)||isNaN(q1)||isNaN(q2)) return null
     if(q1===r1&&q2===r2) return{pts:3,color:'#69f0ae',label:'✅ +3'}
-    if(match.phase!=='groups'){
-      const winner=getWinner(match)
-      const qWinner=q1>q2?match.t1:q1<q2?match.t2:null
-      if(winner&&qWinner&&winner===qWinner) return{pts:1,color:'#ffeb3b',label:'🟡 +1'}
-      return{pts:0,color:'#ef5350',label:'❌ +0'}
-    }
-    const rR=r1>r2?'1':r1<r2?'2':'X',qR=q1>q2?'1':q1<q2?'2':'X'
+    const rR=r1>r2?'1':r1<r2?'2':'X'
+    const qR=q1>q2?'1':q1<q2?'2':'X'
     if(rR===qR) return{pts:1,color:'#ffeb3b',label:'🟡 +1'}
     return{pts:0,color:'#ef5350',label:'❌ +0'}
   }
-
   const ranking=useMemo(()=>{
     const users=[...new Set(allQuinielas.map(r=>r.nickname))]
     return users.map(nick=>{
